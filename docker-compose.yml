@@ -1,0 +1,127 @@
+version: "3.9"
+
+# KVStream — full on-premise inference stack
+#
+# Usage:
+#   docker compose up -d              # start with Ollama backend (default)
+#   KVSTREAM_BACKEND=llamacpp docker compose up -d
+#   docker compose --profile metrics up -d  # + Prometheus + Grafana
+
+services:
+
+  # ------------------------------------------------------------------
+  # KVStream proxy
+  # ------------------------------------------------------------------
+  kvstream:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: kvstream-proxy
+    restart: unless-stopped
+    ports:
+      - "${KVSTREAM_PORT:-8080}:8080"
+    environment:
+      KVSTREAM_HOST: "0.0.0.0"
+      KVSTREAM_PORT: "8080"
+      KVSTREAM_BACKEND__TYPE: "${KVSTREAM_BACKEND:-ollama}"
+      KVSTREAM_BACKEND__BASE_URL: "${KVSTREAM_BACKEND_URL:-http://ollama:11434}"
+      KVSTREAM_BACKEND__MODEL: "${KVSTREAM_MODEL:-llama3.2}"
+      KVSTREAM_MEMORY__NUM_GPU_BLOCKS: "${KVSTREAM_GPU_BLOCKS:-2048}"
+      KVSTREAM_MEMORY__NUM_CPU_BLOCKS: "${KVSTREAM_CPU_BLOCKS:-8192}"
+      KVSTREAM_MEMORY__BLOCK_SIZE: "16"
+      KVSTREAM_SCHEDULER__MAX_BATCH_SIZE: "${KVSTREAM_MAX_BATCH:-16}"
+      KVSTREAM_PREFIX_CACHE__ENABLED: "true"
+    volumes:
+      - kvstream-kv-cache:/tmp/kvstream_kv_cache
+      - ./kvault.yaml:/app/kvault.yaml:ro  # optional config override
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ------------------------------------------------------------------
+  # Ollama backend (default)
+  # ------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kvstream-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ------------------------------------------------------------------
+  # Optional: Pull a model on first start
+  # ------------------------------------------------------------------
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: kvstream-model-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["ollama", "pull", "${KVSTREAM_MODEL:-llama3.2}"]
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    restart: "no"
+
+  # ------------------------------------------------------------------
+  # Prometheus (metrics profile)
+  # ------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kvstream-prometheus
+    profiles: [metrics]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - kvstream
+
+  # ------------------------------------------------------------------
+  # Grafana (metrics profile)
+  # ------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kvstream-grafana
+    profiles: [metrics]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  ollama-models:
+  kvstream-kv-cache:
+  grafana-data:
