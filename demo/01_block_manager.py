@@ -158,7 +158,7 @@ def main() -> None:
     result = bm.can_allocate(1, "gpu")
     console.print(
         f"\ncan_allocate(1 token, gpu) = [bold {'green' if result else 'red'}]{result}[/]\n"
-        "[yellow]LPI's scheduler detects this and preempts the lowest-priority sequence,\n"
+        "[yellow]KVStream's scheduler detects this and preempts the lowest-priority sequence,\n"
         "swapping its pages to CPU to free GPU space.[/]"
     )
 

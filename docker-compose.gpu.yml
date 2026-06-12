@@ -1,0 +1,25 @@
+# GPU acceleration override for KVStream.
+#
+# Requires an NVIDIA GPU on the host plus the nvidia-container-toolkit.
+# Apply on top of the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+services:
+  kvstream:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -7,17 +7,19 @@ It's correct but not optimised: O(n²) memory, standard softmax attention.
 For production use, install flash-attn:
     pip install kvstream[flash]
 """
+
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn.functional as F
 
 
 def paged_attention_naive(
-    query: torch.Tensor,          # [batch, num_heads, head_dim]
-    key_cache: torch.Tensor,      # [batch, seq_len, num_heads, head_dim]
-    value_cache: torch.Tensor,    # [batch, seq_len, num_heads, head_dim]
+    query: torch.Tensor,  # [batch, num_heads, head_dim]
+    key_cache: torch.Tensor,  # [batch, seq_len, num_heads, head_dim]
+    value_cache: torch.Tensor,  # [batch, seq_len, num_heads, head_dim]
     seq_lens: list[int],
     scale: float | None = None,
 ) -> torch.Tensor:
@@ -86,9 +88,11 @@ def select_attention_backend(backend: str):
     if backend == "flash":
         try:
             from kvstream.attention.flash_kernel import paged_attention_flash
+
             return paged_attention_flash
         except ImportError:
             import logging
+
             logging.getLogger("kvstream.attention").warning(
                 "flash-attn not installed — falling back to naive attention. "
                 "Install with: pip install kvstream[flash]"
@@ -96,9 +100,11 @@ def select_attention_backend(backend: str):
     elif backend == "xformers":
         try:
             from kvstream.attention.xformers_kernel import paged_attention_xformers
+
             return paged_attention_xformers
         except ImportError:
             import logging
+
             logging.getLogger("kvstream.attention").warning(
                 "xformers not installed — falling back to naive attention. "
                 "Install with: pip install kvstream[xformers]"

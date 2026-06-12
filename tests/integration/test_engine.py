@@ -4,14 +4,15 @@ Integration tests — engine + proxy + mock backend.
 These tests spin up the full FastAPI app against a mock backend
 that returns deterministic token streams.
 """
-import asyncio
+
+from collections.abc import AsyncIterator
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from typing import AsyncIterator
+from httpx import ASGITransport, AsyncClient
 
 from kvstream.backends.base import BaseBackend, GenerateRequest, Token
-from kvstream.engine import KVaultEngine
+from kvstream.engine import KVStreamEngine
 from kvstream.proxy.app import build_app
 
 
@@ -42,7 +43,7 @@ class MockBackend(BaseBackend):
 
 @pytest.fixture
 def engine():
-    return KVaultEngine(
+    return KVStreamEngine(
         backend=MockBackend(),
         num_gpu_blocks=128,
         num_cpu_blocks=256,
@@ -99,12 +100,15 @@ class TestModelsEndpoint:
 class TestChatCompletions:
     @pytest.mark.asyncio
     async def test_non_streaming_response(self, client):
-        resp = await client.post("/v1/chat/completions", json={
-            "model": "mock-model",
-            "messages": [{"role": "user", "content": "Hi"}],
-            "max_tokens": 64,
-            "stream": False,
-        })
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "mock-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 64,
+                "stream": False,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["object"] == "chat.completion"
@@ -115,12 +119,16 @@ class TestChatCompletions:
     @pytest.mark.asyncio
     async def test_streaming_response_sse_format(self, client):
         chunks = []
-        async with client.stream("POST", "/v1/chat/completions", json={
-            "model": "mock-model",
-            "messages": [{"role": "user", "content": "Hi"}],
-            "max_tokens": 64,
-            "stream": True,
-        }) as resp:
+        async with client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={
+                "model": "mock-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 64,
+                "stream": True,
+            },
+        ) as resp:
             assert resp.status_code == 200
             async for line in resp.aiter_lines():
                 if line.startswith("data: "):
@@ -128,6 +136,7 @@ class TestChatCompletions:
 
         assert chunks[-1] == "[DONE]"
         import json
+
         texts = [
             json.loads(c)["choices"][0]["delta"].get("content", "")
             for c in chunks[:-1]
@@ -140,12 +149,17 @@ class TestPrefixCache:
     @pytest.mark.asyncio
     async def test_prefix_cache_hit_recorded(self, engine, client):
         # First request — populates the prefix cache
-        await client.post("/v1/chat/completions", json={
-            "model": "mock-model",
-            "messages": [{"role": "system", "content": "You are a helpful assistant."},
-                         {"role": "user", "content": "Hello"}],
-            "stream": False,
-        })
+        await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "mock-model",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                "stream": False,
+            },
+        )
 
         # Stats should show at least one cached prefix
         resp = await client.get("/status")

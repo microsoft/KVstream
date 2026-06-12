@@ -10,10 +10,11 @@ Ollama wraps llama.cpp and exposes:
 For prefix caching, we use Ollama's native `keep_alive` and context
 carry-over features to minimize re-computation.
 """
+
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -116,7 +117,7 @@ class OllamaBackend(BaseBackend):
         max_tokens: int = 512,
         temperature: float = 0.8,
         stream: bool = True,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[bytes]:
         """Stream raw SSE chunks from the OpenAI-compat endpoint."""
         payload = {
             "model": self.model,

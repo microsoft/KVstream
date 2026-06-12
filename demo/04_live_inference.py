@@ -29,7 +29,7 @@ from rich import box
 
 console = Console()
 
-LPI_BASE = "http://localhost:8080"
+KVSTREAM_BASE = "http://localhost:8080"
 
 PROMPTS = [
     "In one sentence, what is paged attention?",
@@ -44,7 +44,7 @@ PROMPTS = [
 
 def _check_health(client: httpx.Client) -> dict:
     try:
-        r = client.get(f"{LPI_BASE}/health", timeout=5)
+        r = client.get(f"{KVSTREAM_BASE}/health", timeout=5)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
@@ -52,7 +52,7 @@ def _check_health(client: httpx.Client) -> dict:
 
 def _get_status(client: httpx.Client) -> dict:
     try:
-        r = client.get(f"{LPI_BASE}/status", timeout=5)
+        r = client.get(f"{KVSTREAM_BASE}/status", timeout=5)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
@@ -116,7 +116,7 @@ def _stream_chat(
 
     with client.stream(
         "POST",
-        f"{LPI_BASE}/v1/chat/completions",
+        f"{KVSTREAM_BASE}/v1/chat/completions",
         json=payload,
         timeout=120,
     ) as resp:
@@ -191,7 +191,7 @@ def main(model: str = "phi-3-mini") -> None:
 
                 with client.stream(
                     "POST",
-                    f"{LPI_BASE}/v1/chat/completions",
+                    f"{KVSTREAM_BASE}/v1/chat/completions",
                     json=payload,
                     timeout=120,
                 ) as resp:

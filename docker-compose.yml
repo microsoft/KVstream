@@ -1,11 +1,12 @@
-version: "3.9"
-
 # KVStream — full on-premise inference stack
 #
 # Usage:
-#   docker compose up -d              # start with Ollama backend (default)
+#   docker compose up -d              # start with Ollama backend (default, CPU)
 #   KVSTREAM_BACKEND=llamacpp docker compose up -d
 #   docker compose --profile metrics up -d  # + Prometheus + Grafana
+#
+# GPU acceleration (NVIDIA + nvidia-container-toolkit required):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 services:
 
@@ -33,7 +34,7 @@ services:
       KVSTREAM_PREFIX_CACHE__ENABLED: "true"
     volumes:
       - kvstream-kv-cache:/tmp/kvstream_kv_cache
-      - ./kvault.yaml:/app/kvault.yaml:ro  # optional config override
+      - ./kvstream.yaml:/app/kvstream.yaml:ro  # optional config override
     depends_on:
       ollama:
         condition: service_healthy
@@ -42,13 +43,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   # ------------------------------------------------------------------
   # Ollama backend (default)
@@ -67,13 +61,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   # ------------------------------------------------------------------
   # Optional: Pull a model on first start
@@ -113,8 +100,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_SECURITY_ADMIN_PASSWORD: "${KVSTREAM_GRAFANA_PASSWORD:-admin}"
+      GF_AUTH_ANONYMOUS_ENABLED: "${KVSTREAM_GRAFANA_ANONYMOUS:-false}"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro

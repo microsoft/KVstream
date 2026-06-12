@@ -3,7 +3,9 @@ Unit tests for BlockManager.
 
 These tests run without a GPU — block IDs are just integers.
 """
+
 import pytest
+
 from kvstream.memory.block_manager import BlockManager
 
 
@@ -33,7 +35,7 @@ class TestAllocate:
 
     def test_can_allocate_check(self, bm):
         assert bm.can_allocate(4) is True
-        assert bm.can_allocate(64) is True   # 64/4 = 16 pages, exactly fits
+        assert bm.can_allocate(64) is True  # 64/4 = 16 pages, exactly fits
         assert bm.can_allocate(65) is False  # 65/4 = 17 pages, exceeds pool
 
 

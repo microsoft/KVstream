@@ -1,6 +1,6 @@
 # KVStream Demo Suite
 
-A collection of runnable demonstrations for **KVStream (KVStream)** — a local GPU inference engine implementing PagedAttention, continuous batching and prefix KV-cache deduplication.
+A collection of runnable demonstrations for **KVStream** — a local GPU inference engine implementing PagedAttention, continuous batching and prefix KV-cache deduplication.
 
 ---
 
@@ -105,7 +105,7 @@ Only the user-specific suffix needs to be prefilled.
 Typical result: **4–6× prefill speedup** for requests with a 48-token system prompt.
 
 ### Demo 3 — Continuous Batch Scheduler
-LPI's scheduler makes a *new batching decision every forward pass*:
+KVStream's scheduler makes a *new batching decision every forward pass*:
 - New sequences enter mid-decode
 - Finished sequences leave immediately (no padding waste)
 - Sequences preempted by memory pressure are swapped to CPU and resume when GPU space is free
@@ -131,18 +131,11 @@ keeps the GPU busy throughout with continuous batching.
 
 ## Architecture recap
 
-```
-User request
-     │
-     ▼
-ContinuousBatchScheduler          ← decides who runs each iteration
-     │
-     ├──► BlockManager            ← allocates/frees GPU/CPU pages
-     │         └── copy-on-write fork
-     │
-     ├──► PrefixKVCache           ← deduplicates shared prefixes
-     │
-     └──► Backend adapter         ← Foundry / Ollama / llama.cpp / LM Studio
-               │
-               └──► FastAPI proxy (OpenAI-compatible HTTP)
+```mermaid
+flowchart TD
+    Req["User request"] --> Sched["ContinuousBatchScheduler<br/>decides who runs each iteration"]
+    Sched --> Block["BlockManager<br/>allocates / frees GPU/CPU pages<br/>+ copy-on-write fork"]
+    Sched --> Prefix["PrefixKVCache<br/>deduplicates shared prefixes"]
+    Sched --> Backend["Backend adapter<br/>Foundry / Ollama / llama.cpp / LM Studio"]
+    Backend --> Proxy["FastAPI proxy<br/>(OpenAI-compatible HTTP)"]
 ```

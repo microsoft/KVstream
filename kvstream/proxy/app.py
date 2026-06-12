@@ -8,21 +8,21 @@ Exposes:
   GET  /metrics               — Prometheus metrics
   GET  /status                — live scheduler + memory stats (JSON)
 """
+
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from kvstream.engine import KVaultEngine
+from kvstream.engine import KVStreamEngine
 
 logger = logging.getLogger("kvstream.proxy")
 
@@ -30,6 +30,7 @@ logger = logging.getLogger("kvstream.proxy")
 # ------------------------------------------------------------------
 # Request / Response models (OpenAI-compatible)
 # ------------------------------------------------------------------
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -43,11 +44,11 @@ class ChatCompletionRequest(BaseModel):
     temperature: float = Field(default=0.8, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     stream: bool = False
-    stop: Optional[list[str]] = None
+    stop: list[str] | None = None
     n: int = Field(default=1, ge=1, le=1)  # multi-choice sampling not supported
 
 
-def build_app(engine: KVaultEngine) -> FastAPI:
+def build_app(engine: KVStreamEngine) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Start the continuous-batching scheduler + prefix-cache eviction loops
@@ -76,10 +77,12 @@ def build_app(engine: KVaultEngine) -> FastAPI:
         backend_ok = await engine.backend.health()
         backend_url = getattr(engine.backend, "base_url", "unknown")
         return {
-            "status":          "ok" if backend_ok else "degraded",
-            "backend":         engine.config.backend.type if isinstance(engine.config.backend.type, str) else engine.config.backend.type.value,
-            "backend_url":     backend_url,
-            "backend_model":   getattr(engine.backend, "model", engine.config.backend.model),
+            "status": "ok" if backend_ok else "degraded",
+            "backend": engine.config.backend.type
+            if isinstance(engine.config.backend.type, str)
+            else engine.config.backend.type.value,
+            "backend_url": backend_url,
+            "backend_model": getattr(engine.backend, "model", engine.config.backend.model),
             "backend_healthy": backend_ok,
         }
 
@@ -104,10 +107,7 @@ def build_app(engine: KVaultEngine) -> FastAPI:
         models = await engine.backend.list_models()
         return {
             "object": "list",
-            "data": [
-                {"id": m, "object": "model", "owned_by": "kvstream"}
-                for m in models
-            ],
+            "data": [{"id": m, "object": "model", "owned_by": "kvstream"} for m in models],
         }
 
     # ------------------------------------------------------------------
@@ -140,8 +140,9 @@ def build_app(engine: KVaultEngine) -> FastAPI:
 
     @app.get("/metrics")
     async def metrics():
-        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
         from fastapi.responses import Response
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
@@ -151,8 +152,9 @@ def build_app(engine: KVaultEngine) -> FastAPI:
 # Streaming helpers
 # ------------------------------------------------------------------
 
+
 async def _stream_response(
-    engine: KVaultEngine,
+    engine: KVStreamEngine,
     request_id: str,
     prompt: str,
     req: ChatCompletionRequest,
@@ -171,24 +173,28 @@ async def _stream_response(
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": req.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": token.text},
-                    "finish_reason": token.finish_reason,
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": token.text},
+                        "finish_reason": token.finish_reason,
+                    }
+                ],
             }
             yield f"data: {json.dumps(chunk)}\n\n".encode()
     except Exception:
         # Never leak internal details to the client — log server-side instead.
         logger.exception(f"[{request_id}] stream failed")
-        error_chunk = {"error": {"message": "internal error during generation", "type": "server_error"}}
+        error_chunk = {
+            "error": {"message": "internal error during generation", "type": "server_error"}
+        }
         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
     finally:
         yield b"data: [DONE]\n\n"
 
 
 async def _blocking_response(
-    engine: KVaultEngine,
+    engine: KVStreamEngine,
     request_id: str,
     prompt: str,
     req: ChatCompletionRequest,
@@ -207,22 +213,26 @@ async def _blocking_response(
             finish_reason = token.finish_reason
 
     content = "".join(tokens)
-    return JSONResponse({
-        "id": request_id,
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": req.model,
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": content},
-            "finish_reason": finish_reason,
-        }],
-        "usage": {
-            "prompt_tokens": len(prompt.split()),
-            "completion_tokens": len(tokens),
-            "total_tokens": len(prompt.split()) + len(tokens),
-        },
-    })
+    return JSONResponse(
+        {
+            "id": request_id,
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": req.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": finish_reason,
+                }
+            ],
+            "usage": {
+                "prompt_tokens": len(prompt.split()),
+                "completion_tokens": len(tokens),
+                "total_tokens": len(prompt.split()) + len(tokens),
+            },
+        }
+    )
 
 
 def _messages_to_prompt(messages: list[ChatMessage]) -> str:

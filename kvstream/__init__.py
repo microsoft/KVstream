@@ -2,10 +2,10 @@
 KVStream — PagedAttention & continuous batching for on-premise LLM inference.
 
 Usage:
-    from kvstream import KVaultEngine
+    from kvstream import KVStreamEngine
     from kvstream.backends import OllamaBackend
 
-    engine = KVaultEngine(
+    engine = KVStreamEngine(
         backend=OllamaBackend(base_url="http://localhost:11434"),
         num_gpu_blocks=2048,
         block_size=16,
@@ -13,8 +13,8 @@ Usage:
     await engine.serve(port=8080)
 """
 
-from kvstream.engine import KVaultEngine
-from kvstream.config import KVaultConfig
+from kvstream.config import KVStreamConfig
+from kvstream.engine import KVStreamEngine
 from kvstream.version import __version__
 
-__all__ = ["KVaultEngine", "KVaultConfig", "__version__"]
+__all__ = ["KVStreamEngine", "KVStreamConfig", "__version__"]

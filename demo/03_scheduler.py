@@ -1,7 +1,7 @@
 """
 Demo 3 — Continuous Batching Scheduler
 ========================================
-Simulates how LPI's scheduler decides which sequences run each iteration.
+Simulates how KVStream's scheduler decides which sequences run each iteration.
 
 Unlike static batching (one batch, wait for all to finish, release),
 continuous batching lets sequences join and leave mid-flight.

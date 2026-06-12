@@ -4,11 +4,12 @@ BaseBackend — abstract interface all runtime adapters must implement.
 KVStream is backend-agnostic. Each adapter translates KVStream's internal
 representation into the wire protocol of the target runtime.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -19,7 +20,7 @@ class GenerateRequest:
     max_new_tokens: int
     temperature: float = 0.8
     top_p: float = 0.95
-    stop: list[str] = None
+    stop: list[str] = field(default_factory=list)
     stream: bool = True
     # When set, the backend should skip computing the first N tokens
     # (prefix already cached). Only supported by hard-inject backends.
@@ -30,8 +31,8 @@ class GenerateRequest:
 class Token:
     text: str
     token_id: int
-    log_prob: Optional[float] = None
-    finish_reason: Optional[str] = None  # "stop" | "length" | None
+    log_prob: float | None = None
+    finish_reason: str | None = None  # "stop" | "length" | None
 
 
 class BaseBackend(ABC):
@@ -44,7 +45,7 @@ class BaseBackend(ABC):
     """
 
     @abstractmethod
-    async def generate(self, request: GenerateRequest) -> AsyncIterator[Token]:
+    def generate(self, request: GenerateRequest) -> AsyncIterator[Token]:
         """Stream tokens for a request."""
         ...
 

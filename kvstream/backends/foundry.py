@@ -9,6 +9,7 @@ by probing every TCP-LISTENING port on localhost for an OpenAI-compatible
 
 Start Foundry Local with: foundrylocal serve
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,7 @@ import logging
 import re
 import subprocess
 import sys
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -28,12 +29,13 @@ logger = logging.getLogger("kvstream.backends.foundry")
 # Module-level URL cache — survives across requests within a single process.
 # Cleared whenever the cached URL stops responding so the next request
 # triggers a fresh scan.
-_discovered_url: Optional[str] = None
+_discovered_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Port discovery helpers
 # ---------------------------------------------------------------------------
+
 
 def _all_listening_ports_sync() -> list[int]:
     """
@@ -48,12 +50,15 @@ def _all_listening_ports_sync() -> list[int]:
         try:
             result = subprocess.run(
                 ["netstat", "-ano"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             for line in result.stdout.splitlines():
                 m = re.search(
                     r"TCP\s+(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|::1):(\d+)\s+\S+\s+LISTENING",
-                    line, re.IGNORECASE,
+                    line,
+                    re.IGNORECASE,
                 )
                 if m:
                     port = int(m.group(1))
@@ -66,7 +71,9 @@ def _all_listening_ports_sync() -> list[int]:
         try:
             result = subprocess.run(
                 ["ss", "-tlnH"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             for line in result.stdout.splitlines():
                 m = re.search(r":(\d+)\s+", line)
@@ -83,7 +90,7 @@ def _all_listening_ports_sync() -> list[int]:
 async def _port_scan_discover(
     client: httpx.AsyncClient,
     exclude_ports: set[int] | None = None,
-) -> Optional[str]:
+) -> str | None:
     """
     Concurrently probe every LISTENING port > 1024 for an OpenAI-compatible
     /v1/models endpoint.  Returns the URL of the port that has the most
@@ -100,7 +107,7 @@ async def _port_scan_discover(
     logger.debug("Port scan: checking %d candidate ports (excluded: %s)", len(ports), exclude_ports)
 
     # Returns (url, model_count) so we can prefer ports with loaded models.
-    async def probe(port: int) -> Optional[tuple[str, int]]:
+    async def probe(port: int) -> tuple[str, int] | None:
         url = f"http://localhost:{port}"
         try:
             r = await client.get(f"{url}/v1/models", timeout=1.5)
@@ -125,7 +132,8 @@ async def _port_scan_discover(
     chosen_url, chosen_cnt = (with_models or candidates)[0]
     logger.info(
         "Auto-discovered Foundry Local at %s (%d model(s) loaded)",
-        chosen_url, chosen_cnt,
+        chosen_url,
+        chosen_cnt,
     )
     return chosen_url
 
@@ -180,6 +188,7 @@ async def _resolve_url(
 # ---------------------------------------------------------------------------
 # Backend class
 # ---------------------------------------------------------------------------
+
 
 class FoundryBackend(BaseBackend):
     def __init__(

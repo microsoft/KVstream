@@ -9,11 +9,12 @@ restores it for every subsequent request with the same prefix.
 Start llama.cpp server with slot support:
     ./llama-server -m model.gguf --slots 8 --port 8080 --cont-batching
 """
+
 from __future__ import annotations
 
 import json
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -48,7 +49,7 @@ class LlamaCppBackend(BaseBackend):
             "top_p": request.top_p,
             "stop": request.stop or [],
             "stream": True,
-            "cache_prompt": True,   # enable llama.cpp prompt caching
+            "cache_prompt": True,  # enable llama.cpp prompt caching
         }
 
         async with self._client.stream(

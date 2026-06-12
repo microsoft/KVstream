@@ -13,10 +13,10 @@ Shape: [num_layers, 2, num_blocks, block_size, num_heads, head_dim]
   dim 4 : attention head
   dim 5 : head dimension
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import torch
 
@@ -24,8 +24,9 @@ logger = logging.getLogger("kvstream.memory.kv_cache")
 
 
 def _dtype(name: str) -> torch.dtype:
-    return {"float16": torch.float16, "bfloat16": torch.bfloat16,
-            "float32": torch.float32}.get(name, torch.float16)
+    return {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}.get(
+        name, torch.float16
+    )
 
 
 class PagedKVCache:
@@ -50,7 +51,7 @@ class PagedKVCache:
 
         # --- GPU (or CPU fallback) primary slab ---
         gpu_shape = (num_layers, 2, num_gpu_blocks, block_size, num_heads, head_dim)
-        gpu_bytes  = 1
+        gpu_bytes = 1
         for d in gpu_shape:
             gpu_bytes *= d
         gpu_bytes *= torch.finfo(self.dtype).bits // 8
@@ -65,7 +66,7 @@ class PagedKVCache:
         # pin_memory is only supported on CUDA-enabled machines and not on
         # Windows CPU-only builds — guard carefully.
         cpu_shape = (num_layers, 2, num_cpu_blocks, block_size, num_heads, head_dim)
-        cpu_bytes  = 1
+        cpu_bytes = 1
         for d in cpu_shape:
             cpu_bytes *= d
         cpu_bytes *= torch.finfo(self.dtype).bits // 8
@@ -99,7 +100,7 @@ class PagedKVCache:
         layer_idx: int,
         block_id: int,
         slot: int,
-        key: torch.Tensor,    # [num_heads, head_dim]
+        key: torch.Tensor,  # [num_heads, head_dim]
         value: torch.Tensor,  # [num_heads, head_dim]
     ) -> None:
         cache = self._cache_for(block_id)
@@ -112,13 +113,11 @@ class PagedKVCache:
         layer_idx: int,
         block_ids: list[int],
         slots: list[int],
-        keys: torch.Tensor,    # [batch, num_heads, head_dim]
+        keys: torch.Tensor,  # [batch, num_heads, head_dim]
         values: torch.Tensor,  # [batch, num_heads, head_dim]
     ) -> None:
-        local_ids = torch.tensor(block_ids, dtype=torch.long,
-                                 device=self.gpu_cache.device)
-        slot_ids  = torch.tensor(slots,     dtype=torch.long,
-                                 device=self.gpu_cache.device)
+        local_ids = torch.tensor(block_ids, dtype=torch.long, device=self.gpu_cache.device)
+        slot_ids = torch.tensor(slots, dtype=torch.long, device=self.gpu_cache.device)
         self.gpu_cache[layer_idx, 0, local_ids, slot_ids] = keys
         self.gpu_cache[layer_idx, 1, local_ids, slot_ids] = values
 
@@ -130,7 +129,7 @@ class PagedKVCache:
         self,
         layer_idx: int,
         block_table: list[int],
-        num_tokens: Optional[int] = None,
+        num_tokens: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Gather all KV pages for a sequence into contiguous tensors.
@@ -181,17 +180,15 @@ class PagedKVCache:
     # ------------------------------------------------------------------
 
     def _cache_for(self, block_id: int) -> torch.Tensor:
-        return (self.cpu_cache if block_id >= self._cpu_block_offset
-                else self.gpu_cache)
+        return self.cpu_cache if block_id >= self._cpu_block_offset else self.gpu_cache
 
     def _local_id(self, block_id: int) -> int:
-        return (block_id - self._cpu_block_offset
-                if block_id >= self._cpu_block_offset
-                else block_id)
+        return block_id - self._cpu_block_offset if block_id >= self._cpu_block_offset else block_id
 
     def _pad(self, tensor: torch.Tensor, max_len: int) -> torch.Tensor:
         if tensor.shape[0] == max_len:
             return tensor
-        pad = torch.zeros(max_len - tensor.shape[0], *tensor.shape[1:],
-                          dtype=tensor.dtype, device=tensor.device)
+        pad = torch.zeros(
+            max_len - tensor.shape[0], *tensor.shape[1:], dtype=tensor.dtype, device=tensor.device
+        )
         return torch.cat([tensor, pad], dim=0)

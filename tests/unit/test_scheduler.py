@@ -1,13 +1,14 @@
 """
 Unit tests for ContinuousBatchScheduler.
 """
-import asyncio
+
 import pytest
+
 from kvstream.memory.block_manager import BlockManager
 from kvstream.scheduler.continuous_batch import (
     ContinuousBatchScheduler,
-    SequenceGroup,
     SeqStatus,
+    SequenceGroup,
 )
 
 
@@ -48,7 +49,7 @@ class TestSchedule:
     async def test_decode_vs_prefill_split(self, scheduler):
         seq = make_seq("s1")
         await scheduler.add_request(seq)
-        await scheduler.schedule()   # promotes to running (prefill)
+        await scheduler.schedule()  # promotes to running (prefill)
 
         # Simulate one token generated
         seq.output_tokens.append(42)

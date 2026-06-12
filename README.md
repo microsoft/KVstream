@@ -1,10 +1,10 @@
 # KVStream
 
-**KVStream sits in front of your existing LLM runtime and fixes the biggest bottleneck in local inference: wasted KV cache memory and poor batching. By streaming KV allocation instead of reserving it upfront, KVStream enables paged attention, continuous batching, and up to 8× more concurrent requests on the same GPU.**
+**KVStream sits in front of your existing LLM runtime and fixes the biggest bottleneck in local inference: wasted KV cache memory and poor batching. By streaming KV allocation instead of reserving it upfront, KVStream enables paged attention, continuous batching, and significantly more concurrent requests on the same GPU.**
 
 Works with Ollama, Foundry Local, llama.cpp, and LM Studio — no model changes required.
 
-[![CI](https://github.com/microsoft/kvstream/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/kvstream/actions)
+[![CI](https://github.com/microsoft/KVstream/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/KVstream/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
@@ -36,35 +36,25 @@ How far the concurrency gain goes depends on your GPU, model, and prompt mix —
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Your Application                  │
-│           (any OpenAI-compatible client)            │
-└──────────────────────┬──────────────────────────────┘
-                       │  OpenAI-compatible API
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│                 KVStream Proxy :8080                │
-│                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │
-│  │  Continuous  │  │    Block     │  │  Prefix   │ │
-│  │   Batch      │  │   Manager    │  │ KV Cache  │ │
-│  │  Scheduler   │  │ (page alloc) │  │  (dedup)  │ │
-│  └──────┬───────┘  └──────┬───────┘  └─────┬─────┘ │
-│         └─────────────────┼────────────────┘        │
-│                           ▼                         │
-│             ┌─────────────────────────┐             │
-│             │  KV Page Pool (GPU)     │             │
-│             │  + CPU Swap Buffer      │             │
-│             └────────────┬────────────┘             │
-└──────────────────────────┼──────────────────────────┘
-                           │
-         ┌─────────────────┼──────────────────┐
-         ▼                 ▼                  ▼
-   ┌──────────┐     ┌──────────┐     ┌─────────────┐
-   │  Ollama  │     │ Foundry  │     │  llama.cpp  │
-   │ :11434   │     │  Local   │     │  LM Studio  │
-   └──────────┘     └──────────┘     └─────────────┘
+```mermaid
+flowchart TD
+    App["Your Application<br/>(any OpenAI-compatible client)"]
+    App -->|"OpenAI-compatible API"| Proxy
+
+    subgraph Proxy["KVStream Proxy :8080"]
+        direction TB
+        Sched["Continuous Batch<br/>Scheduler"]
+        Block["Block Manager<br/>(page alloc)"]
+        Prefix["Prefix KV Cache<br/>(dedup)"]
+        Pool["KV Page Pool (GPU)<br/>+ CPU Swap Buffer"]
+        Sched --> Pool
+        Block --> Pool
+        Prefix --> Pool
+    end
+
+    Proxy --> Ollama["Ollama<br/>:11434"]
+    Proxy --> Foundry["Foundry Local"]
+    Proxy --> Llama["llama.cpp / LM Studio"]
 ```
 
 ### Request lifecycle
@@ -109,13 +99,18 @@ KVSTREAM_BACKEND=lmstudio KVSTREAM_BACKEND_URL=http://localhost:1234 docker comp
 ### Option 2 — CLI
 
 ```bash
-pip install kvstream
+# From a clone of this repo (a PyPI release is planned):
+pip install -e .
+
+# Reproducible install with fully pinned versions (CI / production):
+#   pip install -r requirements.txt && pip install -e . --no-deps
 
 # Auto-detect Ollama and start proxy on :8080
 kvstream serve --backend ollama --port 8080 --gpu-blocks 2048
 
-# With llama.cpp (full KV inject — zero recompute on cache hits)
-kvstream serve --backend llamacpp --backend-url http://localhost:8080
+# With llama.cpp — run llama-server on :8081 so it doesn't clash with the
+# proxy's :8080 (full KV inject — zero recompute on cache hits)
+kvstream serve --backend llamacpp --backend-url http://localhost:8081 --port 8080
 
 # Monitor live stats
 kvstream status --watch
@@ -127,15 +122,16 @@ kvstream bench --concurrency 16 --prompt-len 512 --output-len 128
 ### Option 3 — Python library
 
 ```bash
-pip install kvstream
+# From a clone of this repo (a PyPI release is planned):
+pip install -e .
 ```
 
 ```python
 import asyncio
-from kvstream import KVaultEngine
+from kvstream import KVStreamEngine
 from kvstream.backends import OllamaBackend
 
-engine = KVaultEngine(
+engine = KVStreamEngine(
     backend=OllamaBackend(base_url="http://localhost:11434", model="llama3.2"),
     num_gpu_blocks=2048,   # tune to your VRAM
     block_size=16,
@@ -163,7 +159,7 @@ client = openai.AsyncOpenAI(base_url="http://localhost:8080/v1", api_key="none")
 
 ## Configuration
 
-`kvault.yaml` (place in working directory, or pass `--config path/to/file.yaml`):
+`kvstream.yaml` (place in working directory, or pass `--config path/to/file.yaml`):
 
 ```yaml
 backend:
@@ -236,10 +232,12 @@ Compare p50/p99 latency and the error count between the two runs.
 ## Observability
 
 ```bash
-# Prometheus metrics on :9090/metrics
+# KVStream exposes Prometheus metrics at http://localhost:8080/metrics
 # Start the full stack including Prometheus + Grafana
 docker compose --profile metrics up -d
-# Grafana at http://localhost:3000 (admin/admin)
+# Prometheus UI at http://localhost:9090
+# Grafana at http://localhost:3000 (default admin password "admin" — change it,
+# see the Security Considerations section)
 
 # Live CLI dashboard
 kvstream status --watch
@@ -270,6 +268,32 @@ class MyBackend(BaseBackend):
 ```
 
 Register it in `kvstream/backends/__init__.py`, add a CLI option in `kvstream/cli/main.py`, and open a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
+
+---
+
+## Security Considerations
+
+KVStream is designed to run as a **trusted, local inference proxy**. Review the
+following before deploying it anywhere beyond `localhost`:
+
+- **No built-in authentication.** None of the HTTP endpoints (`/v1/chat/completions`,
+  `/status`, `/metrics`, `/health`) require credentials. The server binds to
+  `127.0.0.1` by default. Do **not** bind to `0.0.0.0` or publish the port on an
+  untrusted network without placing an authenticating reverse proxy (e.g. nginx,
+  Caddy, or an API gateway) in front of it.
+- **`docker compose` publishes port 8080.** The container listens on `0.0.0.0`
+  inside the Docker network and the port is mapped to the host. Restrict access
+  with host firewall rules or a reverse proxy if the host is reachable by others.
+- **`/status` and `/metrics` disclose operational data** (batch sizes, memory
+  utilisation, model name). Treat them as internal and do not expose them publicly.
+- **Grafana / Prometheus (`--profile metrics`) are for local development.** The
+  Grafana defaults can be overridden with `KVSTREAM_GRAFANA_PASSWORD` and
+  `KVSTREAM_GRAFANA_ANONYMOUS`; anonymous access is disabled by default. Set a
+  strong password before exposing the dashboard.
+- **The Foundry Local backend discovers the runtime by probing localhost ports.**
+  It only scans the local machine and never makes outbound network connections.
+- Report security issues per [SECURITY.md](SECURITY.md) — do not open public issues
+  for vulnerabilities.
 
 ---
 

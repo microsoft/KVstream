@@ -11,13 +11,13 @@ States:
   SWAPPED  → pages moved to CPU, waiting for GPU space
   FINISHED → done, pages freed
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncIterator, Optional
 
 from kvstream.memory.block_manager import BlockManager
 
@@ -33,6 +33,7 @@ class SeqStatus(str, Enum):
 @dataclass
 class SequenceGroup:
     """One user request = one sequence group (1:1 for now; 1:N for beam search)."""
+
     seq_id: str
     prompt_tokens: list[int]
     max_new_tokens: int
@@ -69,11 +70,12 @@ class SequenceGroup:
 @dataclass
 class SchedulerOutput:
     """What the engine should do on this iteration."""
-    prefill: list[SequenceGroup]   # full prompt pass
-    decode: list[SequenceGroup]    # single-token decode step
+
+    prefill: list[SequenceGroup]  # full prompt pass
+    decode: list[SequenceGroup]  # single-token decode step
     swapped_in: list[SequenceGroup]
     swapped_out: list[SequenceGroup]
-    ignored: list[SequenceGroup]   # waiting, no room
+    ignored: list[SequenceGroup]  # waiting, no room
 
 
 class ContinuousBatchScheduler:
@@ -84,12 +86,20 @@ class ContinuousBatchScheduler:
         max_waiting_tokens: int = 4096,
         preemption_policy: str = "swap",
         priority: str = "fcfs",
+        allow_preemption: bool = True,
     ) -> None:
         self.bm = block_manager
         self.max_batch_size = max_batch_size
         self.max_waiting_tokens = max_waiting_tokens
         self.preemption_policy = preemption_policy
         self.priority = priority
+        # Preemption (swap-out / recompute) only makes sense when KVStream
+        # actually owns the backend's KV tensors — i.e. hard-inject backends
+        # like llama.cpp. For soft-inject backends (Ollama, Foundry, LM Studio)
+        # we cannot pause an in-flight stream, so evicting a "running" sequence
+        # is bookkeeping that the backend ignores. In that mode we leave running
+        # sequences alone and simply queue waiting requests until pages free.
+        self.allow_preemption = allow_preemption
 
         self.waiting: list[SequenceGroup] = []
         self.running: list[SequenceGroup] = []
@@ -129,13 +139,19 @@ class ContinuousBatchScheduler:
                     self.bm.free(seq.seq_id)
                     self.running.remove(seq)
 
-            # If GPU is full, preempt lowest-priority running seq
-            while (self.waiting and
-                   not self.bm.can_allocate(self.waiting[0].prompt_len) and
-                   self.running):
+            # If GPU is full, preempt lowest-priority running seq. Skipped for
+            # soft-inject backends, where a "swapped-out" sequence would keep
+            # streaming anyway — there the waiting request just stays queued
+            # (Step 3 below) until a running sequence finishes and frees pages.
+            while (
+                self.allow_preemption
+                and self.waiting
+                and not self.bm.can_allocate(self.waiting[0].prompt_len)
+                and self.running
+            ):
                 victim = self._pick_preemption_victim()
                 if self.preemption_policy == "swap":
-                    mapping = self.bm.swap_out(victim.seq_id)
+                    self.bm.swap_out(victim.seq_id)
                     victim.status = SeqStatus.SWAPPED
                     self.swapped.append(victim)
                     swapped_out.append(victim)
@@ -152,7 +168,7 @@ class ContinuousBatchScheduler:
                 if len(self.running) >= self.max_batch_size:
                     break
                 if self.bm.can_allocate(seq.total_tokens):
-                    mapping = self.bm.swap_in(seq.seq_id)
+                    self.bm.swap_in(seq.seq_id)
                     seq.status = SeqStatus.RUNNING
                     seq.admission.set()
                     self.running.append(seq)

@@ -11,12 +11,12 @@ Implementation:
   - On a cache hit, the child sequence forks the parent's block table
     and continues from where the prefix ends.
 """
+
 from __future__ import annotations
 
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from kvstream.memory.block_manager import BlockManager
 
@@ -28,8 +28,11 @@ def _hash_tokens(tokens: list[int]) -> str:
     parts = []
     for t in tokens:
         v = t if isinstance(t, int) else int(t)
-        parts.append(v.to_bytes(4, "little", signed=False) if 0 <= v < 2**32
-                     else abs(v).to_bytes(4, "little"))
+        parts.append(
+            v.to_bytes(4, "little", signed=False)
+            if 0 <= v < 2**32
+            else abs(v).to_bytes(4, "little")
+        )
     return hashlib.sha256(b"".join(parts)).hexdigest()[:16]
 
 
@@ -37,7 +40,7 @@ def _hash_tokens(tokens: list[int]) -> str:
 class PrefixEntry:
     prefix_hash: str
     num_tokens: int
-    seq_id: str          # the "canonical" sequence whose blocks we fork
+    seq_id: str  # the "canonical" sequence whose blocks we fork
     created_at: float
     hit_count: int = 0
 
@@ -58,12 +61,12 @@ class PrefixKVCache:
         # hash → PrefixEntry
         self._entries: dict[str, PrefixEntry] = {}
 
-    def match(self, tokens: list[int]) -> Optional[PrefixEntry]:
+    def match(self, tokens: list[int]) -> PrefixEntry | None:
         """
         Find the longest cached prefix that matches the start of tokens.
         Returns None if no match of >= min_match_tokens.
         """
-        best: Optional[PrefixEntry] = None
+        best: PrefixEntry | None = None
         # Check progressively longer prefixes (block-aligned)
         block_size = self.bm.block_size
         for length in range(block_size, min(len(tokens), self.max_prefix_length) + 1, block_size):
@@ -127,10 +130,7 @@ class PrefixKVCache:
     def evict_expired(self) -> int:
         """Remove stale entries and release their pages. Returns count evicted."""
         now = time.monotonic()
-        to_remove = [
-            k for k, v in self._entries.items()
-            if now - v.created_at > self.ttl_seconds
-        ]
+        to_remove = [k for k, v in self._entries.items() if now - v.created_at > self.ttl_seconds]
         freed_canonicals: set[str] = set()
         for k in to_remove:
             entry = self._entries.pop(k)

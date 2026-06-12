@@ -60,7 +60,6 @@ attention:
 
 observability:
   metrics_enabled: true
-  metrics_port: 9090
   log_level: INFO              # DEBUG | INFO | WARNING | ERROR
   trace_requests: false        # set true to log every request (verbose)
 

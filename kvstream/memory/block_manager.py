@@ -10,20 +10,20 @@ Key properties:
   - Copy-on-write for prefix sharing (ref_count > 1)
   - CPU swap buffer for preempted sequences
 """
+
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
 class PhysicalBlock:
     block_id: int
-    device: str = "gpu"         # "gpu" | "cpu"
+    device: str = "gpu"  # "gpu" | "cpu"
     ref_count: int = 0
     # Hash of the token content — used for prefix dedup
-    content_hash: Optional[int] = None
+    content_hash: int | None = None
 
 
 @dataclass
@@ -38,7 +38,7 @@ class SequenceBlockState:
         return len(self.logical_to_physical)
 
     @property
-    def last_block_id(self) -> Optional[int]:
+    def last_block_id(self) -> int | None:
         return self.logical_to_physical[-1] if self.logical_to_physical else None
 
 
@@ -59,8 +59,7 @@ class BlockManager:
 
         # GPU pool
         self._gpu_blocks: dict[int, PhysicalBlock] = {
-            i: PhysicalBlock(block_id=i, device="gpu")
-            for i in range(num_gpu_blocks)
+            i: PhysicalBlock(block_id=i, device="gpu") for i in range(num_gpu_blocks)
         }
         self._gpu_free: list[int] = list(range(num_gpu_blocks))
 
@@ -145,7 +144,7 @@ class BlockManager:
     # Copy-on-write (prefix sharing)
     # ------------------------------------------------------------------
 
-    def fork(self, parent_seq_id: str, child_seq_id: str, num_blocks: Optional[int] = None) -> None:
+    def fork(self, parent_seq_id: str, child_seq_id: str, num_blocks: int | None = None) -> None:
         """
         Share the parent's block table with a child (for prefix caching).
         Uses copy-on-write: blocks are shared until one of them writes.
@@ -154,10 +153,14 @@ class BlockManager:
         """
         with self._lock:
             parent = self._seq_states[parent_seq_id]
-            shared = parent.logical_to_physical[:num_blocks] if num_blocks is not None \
-                     else list(parent.logical_to_physical)
-            num_tokens = (len(shared) * self.block_size
-                          if num_blocks is not None else parent.num_tokens)
+            shared = (
+                parent.logical_to_physical[:num_blocks]
+                if num_blocks is not None
+                else list(parent.logical_to_physical)
+            )
+            num_tokens = (
+                len(shared) * self.block_size if num_blocks is not None else parent.num_tokens
+            )
             child = SequenceBlockState(
                 seq_id=child_seq_id,
                 logical_to_physical=list(shared),

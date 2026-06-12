@@ -1,10 +1,13 @@
 """Smoke test: admission gating, streaming KV allocation, prefix cache hits."""
+
 import asyncio
 import sys
 
+import pytest
+
 from kvstream.backends.base import BaseBackend, GenerateRequest, Token
-from kvstream.config import KVaultConfig
-from kvstream.engine import KVaultEngine
+from kvstream.config import KVStreamConfig
+from kvstream.engine import KVStreamEngine
 
 
 class StubBackend(BaseBackend):
@@ -27,21 +30,23 @@ class StubBackend(BaseBackend):
         return True
 
 
-import pytest
-
-
 @pytest.mark.asyncio
 async def test_claim_machinery():
     await main()
 
 
 async def main():
-    cfg = KVaultConfig()
+    cfg = KVStreamConfig()
     cfg.scheduler.max_batch_size = 2  # tiny batch to force queueing
     backend = StubBackend()
-    engine = KVaultEngine(backend=backend, config=cfg,
-                          num_gpu_blocks=64, num_cpu_blocks=64,
-                          block_size=16, max_batch_size=2)
+    engine = KVStreamEngine(
+        backend=backend,
+        config=cfg,
+        num_gpu_blocks=64,
+        num_cpu_blocks=64,
+        block_size=16,
+        max_batch_size=2,
+    )
 
     shared_prefix = "You are a helpful assistant. " * 4  # > 16 bytes, block-aligned-able
 
@@ -54,8 +59,10 @@ async def main():
     # 6 concurrent requests vs max_batch_size=2
     results = await asyncio.gather(*[one(i) for i in range(6)])
     assert all(len(r) == 9 for r in results), "all requests must complete"
-    print(f"[ok] 6 concurrent requests completed, batch ceiling observed: "
-          f"max_active={backend.max_active} (limit 2)")
+    print(
+        f"[ok] 6 concurrent requests completed, batch ceiling observed: "
+        f"max_active={backend.max_active} (limit 2)"
+    )
     assert backend.max_active <= 2, f"admission gate violated: {backend.max_active}"
 
     # Prefix cache: entries registered and a second wave should HIT

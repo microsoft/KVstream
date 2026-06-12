@@ -8,5 +8,6 @@ __all__ = ["BlockManager", "PagedKVCache", "PrefixKVCache"]
 def __getattr__(name: str):
     if name == "PagedKVCache":
         from kvstream.memory.kv_cache import PagedKVCache
+
         return PagedKVCache
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

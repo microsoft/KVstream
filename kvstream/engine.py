@@ -1,5 +1,5 @@
 """
-KVaultEngine — top-level orchestrator.
+KVStreamEngine — top-level orchestrator.
 
 Wires together:
   - BlockManager (page allocation)
@@ -10,40 +10,41 @@ Wires together:
   - FastAPI proxy (OpenAI-compatible HTTP)
 
 Usage:
-    engine = KVaultEngine(
+    engine = KVStreamEngine(
         backend=OllamaBackend(),
         num_gpu_blocks=512,
         block_size=16,
     )
     await engine.serve(port=8080)
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import uuid
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
 
 import uvicorn
 
 from kvstream.backends.base import BaseBackend, GenerateRequest, Token
-from kvstream.config import KVaultConfig
+from kvstream.config import KVStreamConfig
 from kvstream.memory.block_manager import BlockManager
 from kvstream.memory.prefix_cache import PrefixKVCache
 from kvstream.scheduler.continuous_batch import (
     ContinuousBatchScheduler,
-    SequenceGroup,
     SeqStatus,
+    SequenceGroup,
 )
 
 logger = logging.getLogger("kvstream.engine")
 
 
-class KVaultEngine:
+class KVStreamEngine:
     def __init__(
         self,
         backend: BaseBackend,
-        config: Optional[KVaultConfig] = None,
+        config: KVStreamConfig | None = None,
         # Convenience kwargs — these ALWAYS override whatever is in config
         num_gpu_blocks: int = 512,
         num_cpu_blocks: int = 1024,
@@ -51,7 +52,7 @@ class KVaultEngine:
         max_batch_size: int = 8,
     ) -> None:
         self.backend = backend
-        self.config = config or KVaultConfig()
+        self.config = config or KVStreamConfig()
 
         # CLI kwargs always win over whatever the config object holds
         self.config.memory.num_gpu_blocks = num_gpu_blocks
@@ -79,7 +80,9 @@ class KVaultEngine:
         if backend.supports_hard_kv_inject():
             try:
                 import torch  # noqa: F401 — presence check only
+
                 from kvstream.memory.kv_cache import PagedKVCache
+
                 self.kv_cache = PagedKVCache(
                     num_layers=self.config.attention.num_layers,
                     num_heads=self.config.attention.num_heads,
@@ -126,11 +129,25 @@ class KVaultEngine:
             max_waiting_tokens=self.config.scheduler.max_waiting_tokens,
             preemption_policy=self.config.scheduler.preemption_policy.value,
             priority=self.config.scheduler.priority.value,
+            # Only hard-inject backends (llama.cpp) can actually have their KV
+            # state saved/restored, so only they can be meaningfully preempted.
+            # Soft-inject backends queue instead of evicting in-flight streams.
+            allow_preemption=backend.supports_hard_kv_inject(),
         )
 
+        # Hard backend-concurrency cap. The scheduler's paged accounting can
+        # transiently drop a sequence from its `running` set (preemption /
+        # swap-out) and admit a replacement — but for soft-inject backends
+        # (Ollama, Foundry, LM Studio) we do NOT own the backend's KV tensors,
+        # so the swapped-out stream cannot actually be paused and keeps
+        # consuming a real backend slot. This semaphore enforces the documented
+        # promise — never more than max_batch_size concurrent backend calls —
+        # independently of that bookkeeping.
+        self._backend_slots = asyncio.Semaphore(self.config.scheduler.max_batch_size)
+
         self._running = False
-        self._scheduler_task: Optional[asyncio.Task] = None
-        self._eviction_task: Optional[asyncio.Task] = None
+        self._scheduler_task: asyncio.Task | None = None
+        self._eviction_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Public generation API
@@ -142,7 +159,7 @@ class KVaultEngine:
         max_new_tokens: int = 512,
         temperature: float = 0.8,
         top_p: float = 0.95,
-        stop: Optional[list[str]] = None,
+        stop: list[str] | None = None,
     ) -> AsyncIterator[Token]:
         seq_id = str(uuid.uuid4())
         prompt_tokens = await self.backend.tokenize(prompt)
@@ -154,8 +171,7 @@ class KVaultEngine:
             if match:
                 cached_prefix_tokens = self.prefix_cache.fork_prefix(match, seq_id)
                 logger.debug(
-                    f"[{seq_id[:8]}] prefix cache HIT — "
-                    f"skipping {cached_prefix_tokens} tokens"
+                    f"[{seq_id[:8]}] prefix cache HIT — skipping {cached_prefix_tokens} tokens"
                 )
 
         seq = SequenceGroup(
@@ -186,24 +202,36 @@ class KVaultEngine:
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
-            stop=stop,
+            stop=stop or [],
             cached_prefix_tokens=cached_prefix_tokens,
         )
 
         try:
-            async for token in self.backend.generate(request):
-                seq.output_tokens.append(token.token_id)
-                # Streaming KV allocation: grow the page table one slot per
-                # generated token instead of reserving max_new_tokens upfront.
+            async with self._backend_slots:
+                stream = self.backend.generate(request)
                 try:
-                    self.block_manager.append_slot(seq_id)
-                except MemoryError:
-                    logger.warning(f"[{seq_id[:8]}] KV page pool saturated mid-decode")
-                except KeyError:
-                    pass  # sequence was preempted/aborted concurrently
-                yield token
-                if token.finish_reason:
-                    break
+                    async for token in stream:
+                        seq.output_tokens.append(token.token_id)
+                        # Streaming KV allocation: grow the page table one slot per
+                        # generated token instead of reserving max_new_tokens upfront.
+                        try:
+                            self.block_manager.append_slot(seq_id)
+                        except MemoryError:
+                            logger.warning(f"[{seq_id[:8]}] KV page pool saturated mid-decode")
+                        except KeyError:
+                            pass  # sequence was preempted/aborted concurrently
+                        yield token
+                        if token.finish_reason:
+                            break
+                finally:
+                    # Close the backend stream promptly when we stop consuming
+                    # early (finish_reason reached, or the client disconnected).
+                    # Without this the abandoned async generator — and, for HTTP
+                    # backends, its underlying connection — would stay open until
+                    # GC, leaking a backend slot and a socket.
+                    aclose = getattr(stream, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
         finally:
             if seq.status == SeqStatus.RUNNING:
                 # Register the prefix BEFORE the pages are freed — register()
@@ -223,7 +251,7 @@ class KVaultEngine:
     # HTTP server
     # ------------------------------------------------------------------
 
-    async def serve(self, host: Optional[str] = None, port: Optional[int] = None) -> None:
+    async def serve(self, host: str | None = None, port: int | None = None) -> None:
         from kvstream.proxy.app import build_app
 
         app = build_app(self)
@@ -232,8 +260,7 @@ class KVaultEngine:
 
         logger.info(f"KVStream proxy on http://{server_host}:{server_port}")
         logger.info(
-            f"Backend: {type(self.backend).__name__} @ "
-            f"{getattr(self.backend, 'base_url', 'N/A')}"
+            f"Backend: {type(self.backend).__name__} @ {getattr(self.backend, 'base_url', 'N/A')}"
         )
         logger.info(
             f"Memory: {self.config.memory.num_gpu_blocks} GPU blocks × "
@@ -290,9 +317,7 @@ class KVaultEngine:
                 await self.scheduler.schedule()
             except Exception:
                 logger.exception("scheduler iteration failed")
-            busy = bool(
-                self.scheduler.waiting or self.scheduler.running or self.scheduler.swapped
-            )
+            busy = bool(self.scheduler.waiting or self.scheduler.running or self.scheduler.swapped)
             await asyncio.sleep(0.01 if busy else 0.1)
 
     async def _eviction_loop(self, interval_seconds: int = 60) -> None:
