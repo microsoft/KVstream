@@ -34,9 +34,7 @@ class LlamaCppBackend(BaseBackend):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
-        self.kv_cache_dir = kv_cache_dir or os.path.join(
-            tempfile.gettempdir(), "kvstream_kv_cache"
-        )
+        self.kv_cache_dir = kv_cache_dir or os.path.join(tempfile.gettempdir(), "kvstream_kv_cache")
         self.num_slots = num_slots
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
         os.makedirs(self.kv_cache_dir, exist_ok=True)
