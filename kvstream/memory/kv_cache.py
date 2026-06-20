@@ -157,13 +157,33 @@ class PagedKVCache:
     # ------------------------------------------------------------------
 
     def copy_blocks(self, src_to_dst: dict[int, int]) -> None:
-        """Copy block contents during GPU↔CPU swap."""
-        for src_id, dst_id in src_to_dst.items():
-            src_cache = self._cache_for(src_id)
-            dst_cache = self._cache_for(dst_id)
-            src_local = self._local_id(src_id)
-            dst_local = self._local_id(dst_id)
-            dst_cache[:, :, dst_local] = src_cache[:, :, src_local].to(dst_cache.device)
+        """Copy block contents during GPU↔CPU swap — batched per transfer direction."""
+        if not src_to_dst:
+            return
+        cpu_off = self._cpu_block_offset
+        gpu_to_gpu: list[tuple[int, int]] = []
+        gpu_to_cpu: list[tuple[int, int]] = []
+        cpu_to_gpu: list[tuple[int, int]] = []
+        for src, dst in src_to_dst.items():
+            if src < cpu_off and dst < cpu_off:
+                gpu_to_gpu.append((src, dst))
+            elif src < cpu_off:
+                gpu_to_cpu.append((src, dst - cpu_off))
+            else:
+                cpu_to_gpu.append((src - cpu_off, dst))
+
+        if gpu_to_gpu:
+            s_ids = [s for s, _ in gpu_to_gpu]
+            d_ids = [d for _, d in gpu_to_gpu]
+            self.gpu_cache[:, :, d_ids] = self.gpu_cache[:, :, s_ids]
+        if gpu_to_cpu:
+            s_ids = [s for s, _ in gpu_to_cpu]
+            d_ids = [d for _, d in gpu_to_cpu]
+            self.cpu_cache[:, :, d_ids] = self.gpu_cache[:, :, s_ids].cpu()
+        if cpu_to_gpu:
+            s_ids = [s for s, _ in cpu_to_gpu]
+            d_ids = [d for _, d in cpu_to_gpu]
+            self.gpu_cache[:, :, d_ids] = self.cpu_cache[:, :, s_ids].to(self.gpu_cache.device)
 
     # ------------------------------------------------------------------
     # Stats

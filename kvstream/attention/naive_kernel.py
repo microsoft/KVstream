@@ -72,11 +72,13 @@ def _build_length_mask(
     seq_lens: list[int],
     device: torch.device,
 ) -> torch.Tensor:
-    """Build an additive mask that sets padding positions to -inf."""
+    """Build an additive mask that sets padding positions to -inf — vectorised."""
+    lens = torch.tensor(seq_lens, dtype=torch.long, device=device)  # [batch]
+    positions = torch.arange(max_seq_len, device=device).unsqueeze(0)  # [1, max_seq_len]
+    # True where the position index is beyond the sequence length (padding).
+    padding = positions >= lens.unsqueeze(1)  # [batch, max_seq_len]
     mask = torch.zeros(batch, 1, 1, max_seq_len, device=device)
-    for i, length in enumerate(seq_lens):
-        if length < max_seq_len:
-            mask[i, 0, 0, length:] = float("-inf")
+    mask.masked_fill_(padding.unsqueeze(1).unsqueeze(1), float("-inf"))
     return mask
 
 

@@ -199,6 +199,9 @@ async def _blocking_response(
     prompt: str,
     req: ChatCompletionRequest,
 ) -> JSONResponse:
+    # Tokenize once up-front so usage counts reflect real token count,
+    # not the highly inaccurate whitespace-split approximation.
+    prompt_token_ids = await engine.backend.tokenize(prompt)
     tokens = []
     finish_reason = "stop"
     async for token in engine.generate(
@@ -213,6 +216,7 @@ async def _blocking_response(
             finish_reason = token.finish_reason
 
     content = "".join(tokens)
+    prompt_token_count = len(prompt_token_ids)
     return JSONResponse(
         {
             "id": request_id,
@@ -227,9 +231,9 @@ async def _blocking_response(
                 }
             ],
             "usage": {
-                "prompt_tokens": len(prompt.split()),
+                "prompt_tokens": prompt_token_count,
                 "completion_tokens": len(tokens),
-                "total_tokens": len(prompt.split()) + len(tokens),
+                "total_tokens": prompt_token_count + len(tokens),
             },
         }
     )

@@ -83,3 +83,8 @@ class BaseBackend(ABC):
     def supports_hard_kv_inject(self) -> bool:
         """Return True if this backend supports save/restore KV state."""
         return False
+
+    async def aclose(self) -> None:
+        """Release resources held by this backend (e.g. HTTP connection pools).
+        Call this when the backend is no longer needed."""
+        pass

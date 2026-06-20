@@ -130,15 +130,16 @@ class PrefixKVCache:
     def evict_expired(self) -> int:
         """Remove stale entries and release their pages. Returns count evicted."""
         now = time.monotonic()
-        to_remove = [k for k, v in self._entries.items() if now - v.created_at > self.ttl_seconds]
+        to_remove = {k for k, v in self._entries.items() if now - v.created_at > self.ttl_seconds}
+        if not to_remove:
+            return 0
+        # Build the set of canonicals still referenced by *live* entries in a
+        # single O(n) pass — avoids the original O(n*m) any() scan per item.
+        live_canonicals = {v.seq_id for k, v in self._entries.items() if k not in to_remove}
         freed_canonicals: set[str] = set()
         for k in to_remove:
             entry = self._entries.pop(k)
-            # Several chain entries share one canonical sequence — free once,
-            # and only when no remaining entry still references it.
-            if entry.seq_id not in freed_canonicals and not any(
-                e.seq_id == entry.seq_id for e in self._entries.values()
-            ):
+            if entry.seq_id not in live_canonicals and entry.seq_id not in freed_canonicals:
                 self.bm.free(entry.seq_id)
                 freed_canonicals.add(entry.seq_id)
         return len(to_remove)
@@ -154,5 +155,5 @@ class PrefixKVCache:
     def _is_valid(self, entry: PrefixEntry) -> bool:
         return (
             time.monotonic() - entry.created_at < self.ttl_seconds
-            and self.bm._seq_states.get(entry.seq_id) is not None
+            and self.bm.has_sequence(entry.seq_id)
         )

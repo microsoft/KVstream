@@ -10,6 +10,8 @@ Priority order (highest to lowest):
 
 from __future__ import annotations
 
+import os
+import tempfile
 from enum import Enum
 from typing import Literal
 
@@ -55,7 +57,9 @@ class BackendConfig(BaseModel):
     model: str = "phi-3-mini"
     timeout_seconds: float = 120.0
     kv_inject_enabled: bool = True
-    kv_cache_dir: str = "/tmp/kvstream_kv_cache"
+    kv_cache_dir: str = Field(
+        default_factory=lambda: os.path.join(tempfile.gettempdir(), "kvstream_kv_cache")
+    )
 
 
 class MemoryConfig(BaseModel):
@@ -80,6 +84,9 @@ class SchedulerConfig(BaseModel):
     max_tokens_per_seq: int = 8192
     # How long a request may queue for batch admission before it is rejected.
     admission_timeout_seconds: float = 120.0
+    # Maximum number of requests that may sit in the waiting queue.
+    # Requests beyond this cap are rejected immediately with an error.
+    max_queue_depth: int = 1000
 
 
 class PrefixCacheConfig(BaseModel):

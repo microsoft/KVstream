@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kvstream"
-version = "0.1.0"
+dynamic = ["version"]
 description = "PagedAttention + continuous batching as a drop-in plugin for local LLM inference"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [{ name = "KVStream Contributors" }]
 keywords = ["llm", "inference", "paged-attention", "ollama", "kv-cache", "on-premise"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
@@ -59,6 +59,21 @@ Issues = "https://github.com/microsoft/kvstream/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kvstream"]
+# Include the py.typed marker so type checkers recognise the package
+artifacts = ["kvstream/py.typed"]
+
+[tool.hatch.version]
+path = "kvstream/version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "kvstream/",
+    "tests/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 100

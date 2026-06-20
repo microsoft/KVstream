@@ -30,6 +30,17 @@ logger = logging.getLogger("kvstream.backends.foundry")
 # Cleared whenever the cached URL stops responding so the next request
 # triggers a fresh scan.
 _discovered_url: str | None = None
+# Serialises concurrent discovery attempts so only one coroutine performs
+# the expensive port scan at a time (prevents thundering herd).
+_discovery_lock: asyncio.Lock | None = None
+
+
+def _get_discovery_lock() -> asyncio.Lock:
+    """Return the per-process asyncio.Lock for discovery, creating it lazily."""
+    global _discovery_lock
+    if _discovery_lock is None:
+        _discovery_lock = asyncio.Lock()
+    return _discovery_lock
 
 
 # ---------------------------------------------------------------------------
@@ -155,34 +166,47 @@ async def _resolve_url(
     """
     global _discovered_url
 
-    candidates: list[str] = []
-    if _discovered_url and _discovered_url != configured_url:
-        candidates.append(_discovered_url)
-    candidates.append(configured_url)
-
-    for url in candidates:
+    # Fast path: check cached URL without acquiring the lock.
+    cached = _discovered_url
+    if cached:
         try:
-            r = await client.get(f"{url}/v1/models", timeout=2.0)
+            r = await client.get(f"{cached}/v1/models", timeout=2.0)
             if r.status_code == 200:
                 body = r.json()
-                if isinstance(body, dict) and "data" in body:
-                    model_count = len(body.get("data") or [])
-                    if model_count > 0:
-                        # This URL has loaded models — use it directly.
-                        _discovered_url = url
-                        return url
+                if isinstance(body, dict) and len(body.get("data") or []) > 0:
+                    return cached
         except Exception:
-            continue
+            pass
+        _discovered_url = None  # stale — fall through to serialised discovery
 
-    # None of the known candidates have a loaded model — full port scan.
-    found = await _port_scan_discover(client, exclude_ports=exclude_ports)
-    if found:
-        _discovered_url = found
-        return found
+    # Slow path: serialise discovery so only one coroutine does the expensive
+    # port scan at a time (prevents thundering herd on cold start / reconnect).
+    async with _get_discovery_lock():
+        # Re-check after acquiring the lock — a sibling coroutine may have
+        # already completed discovery while we were waiting.
+        if _discovered_url and _discovered_url != configured_url:
+            return _discovered_url
 
-    # Clear stale cache so the next call retries discovery from scratch.
-    _discovered_url = None
-    return configured_url
+        # Probe the configured URL first (cheapest check).
+        try:
+            r = await client.get(f"{configured_url}/v1/models", timeout=2.0)
+            if r.status_code == 200:
+                body = r.json()
+                if isinstance(body, dict) and len(body.get("data") or []) > 0:
+                    _discovered_url = configured_url
+                    return configured_url
+        except Exception:
+            pass
+
+        # Full port scan as last resort.
+        found = await _port_scan_discover(client, exclude_ports=exclude_ports)
+        if found:
+            _discovered_url = found
+            return found
+
+        # Nothing found — clear cache and return configured URL as fallback.
+        _discovered_url = None
+        return configured_url
 
 
 # ---------------------------------------------------------------------------
@@ -262,3 +286,6 @@ class FoundryBackend(BaseBackend):
             return [m["id"] for m in data.get("data", [])]
         except Exception:
             return []
+
+    async def aclose(self) -> None:
+        await self._client.aclose()

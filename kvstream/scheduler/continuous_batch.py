@@ -15,6 +15,7 @@ States:
 from __future__ import annotations
 
 import asyncio
+import bisect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -87,6 +88,7 @@ class ContinuousBatchScheduler:
         preemption_policy: str = "swap",
         priority: str = "fcfs",
         allow_preemption: bool = True,
+        max_queue_depth: int = 1000,
     ) -> None:
         self.bm = block_manager
         self.max_batch_size = max_batch_size
@@ -100,6 +102,7 @@ class ContinuousBatchScheduler:
         # is bookkeeping that the backend ignores. In that mode we leave running
         # sequences alone and simply queue waiting requests until pages free.
         self.allow_preemption = allow_preemption
+        self.max_queue_depth = max_queue_depth
 
         self.waiting: list[SequenceGroup] = []
         self.running: list[SequenceGroup] = []
@@ -109,9 +112,18 @@ class ContinuousBatchScheduler:
 
     async def add_request(self, seq: SequenceGroup) -> None:
         async with self._lock:
-            self.waiting.append(seq)
+            if len(self.waiting) >= self.max_queue_depth:
+                raise RuntimeError(
+                    f"Request queue is full ({self.max_queue_depth} requests waiting). "
+                    "Server is overloaded — retry later."
+                )
             if self.priority == "sjf":
-                self.waiting.sort(key=lambda s: s.prompt_len)
+                # O(n) sorted insertion via binary search instead of O(n log n) full sort.
+                keys = [s.prompt_len for s in self.waiting]
+                idx = bisect.bisect_right(keys, seq.prompt_len)
+                self.waiting.insert(idx, seq)
+            else:
+                self.waiting.append(seq)
 
     async def abort_request(self, seq_id: str) -> None:
         async with self._lock:

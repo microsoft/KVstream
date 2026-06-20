@@ -45,24 +45,32 @@ class KVStreamEngine:
         self,
         backend: BaseBackend,
         config: KVStreamConfig | None = None,
-        # Convenience kwargs — these ALWAYS override whatever is in config
-        num_gpu_blocks: int = 512,
-        num_cpu_blocks: int = 1024,
-        block_size: int = 16,
-        max_batch_size: int = 8,
+        # Convenience kwargs — when provided (not None) they override the
+        # corresponding config / YAML / env-var value.  Pass None (the default)
+        # to let the loaded config win, so kvstream.yaml values are respected.
+        num_gpu_blocks: int | None = None,
+        num_cpu_blocks: int | None = None,
+        block_size: int | None = None,
+        max_batch_size: int | None = None,
     ) -> None:
         self.backend = backend
         self.config = config or KVStreamConfig()
 
-        # CLI kwargs always win over whatever the config object holds
-        self.config.memory.num_gpu_blocks = num_gpu_blocks
-        self.config.memory.num_cpu_blocks = num_cpu_blocks
-        self.config.memory.block_size = block_size
-        self.config.scheduler.max_batch_size = max_batch_size
+        # Apply explicit overrides only when the caller supplied a value.
+        if num_gpu_blocks is not None:
+            self.config.memory.num_gpu_blocks = num_gpu_blocks
+        if num_cpu_blocks is not None:
+            self.config.memory.num_cpu_blocks = num_cpu_blocks
+        if block_size is not None:
+            self.config.memory.block_size = block_size
+        if max_batch_size is not None:
+            self.config.scheduler.max_batch_size = max_batch_size
 
         logger.info(
-            f"Engine init: gpu_blocks={num_gpu_blocks} cpu_blocks={num_cpu_blocks} "
-            f"block_size={block_size} max_batch={max_batch_size}"
+            f"Engine init: gpu_blocks={self.config.memory.num_gpu_blocks} "
+            f"cpu_blocks={self.config.memory.num_cpu_blocks} "
+            f"block_size={self.config.memory.block_size} "
+            f"max_batch={self.config.scheduler.max_batch_size}"
         )
 
         # --- Block manager (always created — no torch needed) ---
@@ -133,6 +141,7 @@ class KVStreamEngine:
             # state saved/restored, so only they can be meaningfully preempted.
             # Soft-inject backends queue instead of evicting in-flight streams.
             allow_preemption=backend.supports_hard_kv_inject(),
+            max_queue_depth=self.config.scheduler.max_queue_depth,
         )
 
         # Hard backend-concurrency cap. The scheduler's paged accounting can
@@ -305,6 +314,7 @@ class KVStreamEngine:
                     pass
         self._scheduler_task = None
         self._eviction_task = None
+        await self.backend.aclose()
 
     async def _scheduler_loop(self) -> None:
         """

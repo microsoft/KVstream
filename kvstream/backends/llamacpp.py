@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections.abc import AsyncIterator
 
 import httpx
@@ -27,16 +28,18 @@ class LlamaCppBackend(BaseBackend):
         base_url: str = "http://localhost:8080",
         model: str = "local",
         timeout: float = 120.0,
-        kv_cache_dir: str = "/tmp/kvstream_kv_cache",
+        kv_cache_dir: str | None = None,
         num_slots: int = 8,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
-        self.kv_cache_dir = kv_cache_dir
+        self.kv_cache_dir = kv_cache_dir or os.path.join(
+            tempfile.gettempdir(), "kvstream_kv_cache"
+        )
         self.num_slots = num_slots
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
-        os.makedirs(kv_cache_dir, exist_ok=True)
+        os.makedirs(self.kv_cache_dir, exist_ok=True)
 
     def supports_hard_kv_inject(self) -> bool:
         return True
@@ -133,3 +136,6 @@ class LlamaCppBackend(BaseBackend):
             return [data.get("model_path", self.model)]
         except Exception:
             return [self.model]
+
+    async def aclose(self) -> None:
+        await self._client.aclose()

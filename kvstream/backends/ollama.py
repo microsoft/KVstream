@@ -107,6 +107,9 @@ class OllamaBackend(BaseBackend):
         # Fallback: UTF-8 bytes
         return list(text.encode("utf-8"))
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     # ------------------------------------------------------------------
     # OpenAI-compatible path (used by the proxy for pass-through)
     # ------------------------------------------------------------------
