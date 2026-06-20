@@ -153,7 +153,6 @@ class PrefixKVCache:
         }
 
     def _is_valid(self, entry: PrefixEntry) -> bool:
-        return (
-            time.monotonic() - entry.created_at < self.ttl_seconds
-            and self.bm.has_sequence(entry.seq_id)
+        return time.monotonic() - entry.created_at < self.ttl_seconds and self.bm.has_sequence(
+            entry.seq_id
         )
