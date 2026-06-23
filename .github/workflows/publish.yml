@@ -44,7 +44,7 @@ jobs:
           path: dist/
 
       - name: Install twine
-        run: pip install twine
+        run: pip install --upgrade twine packaging
 
       - name: Check distributions
         run: twine check --strict dist/*
