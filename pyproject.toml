@@ -53,9 +53,9 @@ dev = [
 kvstream = "kvstream.cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/microsoft/kvstream"
-Repository = "https://github.com/microsoft/kvstream"
-Issues = "https://github.com/microsoft/kvstream/issues"
+Homepage = "https://github.com/microsoft/KVstream"
+Repository = "https://github.com/microsoft/KVstream"
+Issues = "https://github.com/microsoft/KVstream/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kvstream"]
