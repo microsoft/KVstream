@@ -7,6 +7,7 @@ Works with Ollama, Foundry Local, llama.cpp, and LM Studio — no model changes 
 [![CI](https://github.com/microsoft/KVstream/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/KVstream/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/kvstream.svg)](https://pypi.org/project/kvstream/)
 
 ---
 
@@ -69,6 +70,12 @@ flowchart TD
 ---
 
 ## Quick Start
+
+KVStream is available on [PyPI](https://pypi.org/project/kvstream/) and can be installed with:
+
+```bash
+pip install kvstream
+```
 
 ### Option 1 — Docker (recommended, zero Python setup)
 
