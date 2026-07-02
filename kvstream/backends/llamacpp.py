@@ -43,22 +43,27 @@ class LlamaCppBackend(BaseBackend):
         return True
 
     async def generate(self, request: GenerateRequest) -> AsyncIterator[Token]:
-        payload = {
+        payload: dict = {
             "prompt": request.prompt,
             "n_predict": request.max_new_tokens,
             "temperature": request.temperature,
             "top_p": request.top_p,
-            "stop": request.stop or [],
             "stream": True,
             "cache_prompt": True,  # enable llama.cpp prompt caching
         }
+        if request.stop:
+            payload["stop"] = request.stop
 
         async with self._client.stream(
             "POST",
             f"{self.base_url}/completion",
             json=payload,
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                body = (await resp.aread()).decode(errors="replace")
+                raise RuntimeError(
+                    f"llama.cpp returned HTTP {resp.status_code}: {body[:200]}"
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

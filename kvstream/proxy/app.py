@@ -159,35 +159,67 @@ async def _stream_response(
     prompt: str,
     req: ChatCompletionRequest,
 ) -> AsyncIterator[bytes]:
+    """
+    Yield SSE chunks for a streaming chat completion.
+
+    Key invariant: the HTTP 200 status is committed by FastAPI/Starlette the
+    moment the *first* byte is yielded.  If the backend fails before producing
+    any tokens we MUST raise before yielding so that FastAPI can still return
+    a proper 4xx/5xx status code to the caller.
+
+    Strategy:
+      1. Fetch the first token without yielding (pre-flight).
+      2. If that raises → raise HTTPException(502) before any bytes leave —
+         bench_lib / any client sees a real error status.
+      3. Only after the first token is in hand do we yield (commit HTTP 200)
+         and continue streaming the remainder.
+    """
     created = int(time.time())
+
+    gen = engine.generate(
+        prompt=prompt,
+        max_new_tokens=req.max_tokens,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        stop=req.stop,
+    )
+
+    # ── Pre-flight: get the first token before committing to HTTP 200 ────────
     try:
-        async for token in engine.generate(
-            prompt=prompt,
-            max_new_tokens=req.max_tokens,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop=req.stop,
-        ):
-            chunk = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": req.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": token.text},
-                        "finish_reason": token.finish_reason,
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n".encode()
-    except Exception:
-        # Never leak internal details to the client — log server-side instead.
-        logger.exception(f"[{request_id}] stream failed")
-        error_chunk = {
-            "error": {"message": "internal error during generation", "type": "server_error"}
-        }
+        first_token = await gen.__anext__()
+    except StopAsyncIteration:
+        # Backend produced zero tokens — send [DONE] and return.
+        yield b"data: [DONE]\n\n"
+        return
+    except Exception as _exc:
+        # Backend is unreachable or errored before the first token.
+        # Close the generator so engine.generate()'s finally blocks run
+        # (releases _backend_slots semaphore, aborts scheduler entry).
+        await gen.aclose()
+        logger.error(f"[{request_id}] backend failed before first token: {_exc}")
+        # Raise BEFORE yielding — FastAPI returns 502, not 200+error-chunk.
+        raise HTTPException(status_code=502, detail=str(_exc))
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _make_chunk(token: object) -> bytes:
+        return f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': req.model, 'choices': [{'index': 0, 'delta': {'content': token.text}, 'finish_reason': token.finish_reason}]})}\n\n".encode()  # type: ignore[attr-defined]
+
+    # Yield first token — this is the moment HTTP 200 is sent.
+    yield _make_chunk(first_token)
+    if first_token.finish_reason:  # type: ignore[attr-defined]
+        yield b"data: [DONE]\n\n"
+        return
+
+    # Stream the remainder.  Mid-stream errors are delivered as error chunks
+    # (HTTP status already committed to 200 at this point).
+    try:
+        async for token in gen:
+            yield _make_chunk(token)
+            if token.finish_reason:
+                break
+    except Exception as _exc:
+        logger.error(f"[{request_id}] stream failed mid-generation: {_exc}")
+        error_chunk = {"error": {"message": str(_exc), "type": "server_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n".encode()
     finally:
         yield b"data: [DONE]\n\n"

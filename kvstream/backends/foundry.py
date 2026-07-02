@@ -26,6 +26,8 @@ from kvstream.backends.base import BaseBackend, GenerateRequest, Token
 
 logger = logging.getLogger("kvstream.backends.foundry")
 
+import time as _time  # aliased to avoid shadowing local variables
+
 # Module-level URL cache — survives across requests within a single process.
 # Cleared whenever the cached URL stops responding so the next request
 # triggers a fresh scan.
@@ -33,6 +35,12 @@ _discovered_url: str | None = None
 # Serialises concurrent discovery attempts so only one coroutine performs
 # the expensive port scan at a time (prevents thundering herd).
 _discovery_lock: asyncio.Lock | None = None
+# Timestamp of the last failed discovery scan.  When Foundry is not running
+# we skip the expensive port scan for _SCAN_COOLDOWN_S seconds so that a
+# burst of concurrent requests (e.g. a benchmark) doesn't fire 24 separate
+# netstat + port-probe sweeps.
+_last_failed_scan: float = 0.0
+_SCAN_COOLDOWN_S: float = 5.0
 
 
 def _get_discovery_lock() -> asyncio.Lock:
@@ -182,6 +190,7 @@ async def _resolve_url(
     # Slow path: serialise discovery so only one coroutine does the expensive
     # port scan at a time (prevents thundering herd on cold start / reconnect).
     async with _get_discovery_lock():
+        global _last_failed_scan
         # Re-check after acquiring the lock — a sibling coroutine may have
         # already completed discovery while we were waiting.
         if _discovered_url and _discovered_url != configured_url:
@@ -198,13 +207,19 @@ async def _resolve_url(
         except Exception:
             pass
 
+        # Skip the expensive port scan if we already tried recently and
+        # found nothing — avoids a netstat+probe storm during benchmarks.
+        if _time.monotonic() - _last_failed_scan < _SCAN_COOLDOWN_S:
+            return configured_url
+
         # Full port scan as last resort.
         found = await _port_scan_discover(client, exclude_ports=exclude_ports)
         if found:
             _discovered_url = found
             return found
 
-        # Nothing found — clear cache and return configured URL as fallback.
+        # Nothing found — record timestamp and return configured URL as fallback.
+        _last_failed_scan = _time.monotonic()
         _discovered_url = None
         return configured_url
 
@@ -238,21 +253,28 @@ class FoundryBackend(BaseBackend):
 
     async def generate(self, request: GenerateRequest) -> AsyncIterator[Token]:
         url = await self._url()
-        payload = {
+        payload: dict = {
             "model": self.model,
             "messages": [{"role": "user", "content": request.prompt}],
             "max_tokens": request.max_new_tokens,
             "temperature": request.temperature,
             "top_p": request.top_p,
             "stream": True,
-            "stop": request.stop or [],
         }
+        # Foundry Local (and many OpenAI-compatible runtimes) return HTTP 400
+        # when `stop` is present but empty.  Only include it when non-empty.
+        if request.stop:
+            payload["stop"] = request.stop
         async with self._client.stream(
             "POST",
             f"{url}/v1/chat/completions",
             json=payload,
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                body = (await resp.aread()).decode(errors="replace")
+                raise RuntimeError(
+                    f"Foundry Local returned HTTP {resp.status_code}: {body[:200]}"
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

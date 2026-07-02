@@ -36,17 +36,19 @@ class OllamaBackend(BaseBackend):
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
 
     async def generate(self, request: GenerateRequest) -> AsyncIterator[Token]:
+        options: dict = {
+            "num_predict": request.max_new_tokens,
+            "temperature": request.temperature,
+            "top_p": request.top_p,
+        }
+        if request.stop:
+            options["stop"] = request.stop
         payload = {
             "model": self.model,
             "prompt": request.prompt,
             "stream": True,
             "keep_alive": self.keep_alive,
-            "options": {
-                "num_predict": request.max_new_tokens,
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "stop": request.stop or [],
-            },
+            "options": options,
         }
 
         async with self._client.stream(
@@ -54,7 +56,11 @@ class OllamaBackend(BaseBackend):
             f"{self.base_url}/api/generate",
             json=payload,
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                body = (await resp.aread()).decode(errors="replace")
+                raise RuntimeError(
+                    f"Ollama returned HTTP {resp.status_code}: {body[:200]}"
+                )
             async for line in resp.aiter_lines():
                 if not line.strip():
                     continue
