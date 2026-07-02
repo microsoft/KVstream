@@ -15,13 +15,15 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from kvstream.backends.base import Token
 from kvstream.engine import KVStreamEngine
 
 logger = logging.getLogger("kvstream.proxy")
@@ -176,12 +178,15 @@ async def _stream_response(
     """
     created = int(time.time())
 
-    gen = engine.generate(
-        prompt=prompt,
-        max_new_tokens=req.max_tokens,
-        temperature=req.temperature,
-        top_p=req.top_p,
-        stop=req.stop,
+    gen = cast(
+        AsyncGenerator[Token, None],
+        engine.generate(
+            prompt=prompt,
+            max_new_tokens=req.max_tokens,
+            temperature=req.temperature,
+            top_p=req.top_p,
+            stop=req.stop,
+        ),
     )
 
     # ── Pre-flight: get the first token before committing to HTTP 200 ────────
@@ -201,12 +206,25 @@ async def _stream_response(
         raise HTTPException(status_code=502, detail=str(_exc))
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _make_chunk(token: object) -> bytes:
-        return f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': req.model, 'choices': [{'index': 0, 'delta': {'content': token.text}, 'finish_reason': token.finish_reason}]})}\n\n".encode()  # type: ignore[attr-defined]
+    def _make_chunk(token: Token) -> bytes:
+        chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": req.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": token.text},
+                    "finish_reason": token.finish_reason,
+                }
+            ],
+        }
+        return f"data: {json.dumps(chunk)}\n\n".encode()
 
     # Yield first token — this is the moment HTTP 200 is sent.
     yield _make_chunk(first_token)
-    if first_token.finish_reason:  # type: ignore[attr-defined]
+    if first_token.finish_reason:
         yield b"data: [DONE]\n\n"
         return
 
