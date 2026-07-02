@@ -61,9 +61,7 @@ class LlamaCppBackend(BaseBackend):
         ) as resp:
             if resp.status_code >= 400:
                 body = (await resp.aread()).decode(errors="replace")
-                raise RuntimeError(
-                    f"llama.cpp returned HTTP {resp.status_code}: {body[:200]}"
-                )
+                raise RuntimeError(f"llama.cpp returned HTTP {resp.status_code}: {body[:200]}")
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
