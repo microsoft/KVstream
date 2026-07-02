@@ -18,6 +18,7 @@ import logging
 import re
 import subprocess
 import sys
+import time as _time
 from collections.abc import AsyncIterator
 
 import httpx
@@ -25,8 +26,6 @@ import httpx
 from kvstream.backends.base import BaseBackend, GenerateRequest, Token
 
 logger = logging.getLogger("kvstream.backends.foundry")
-
-import time as _time  # aliased to avoid shadowing local variables
 
 # Module-level URL cache — survives across requests within a single process.
 # Cleared whenever the cached URL stops responding so the next request
@@ -272,9 +271,7 @@ class FoundryBackend(BaseBackend):
         ) as resp:
             if resp.status_code >= 400:
                 body = (await resp.aread()).decode(errors="replace")
-                raise RuntimeError(
-                    f"Foundry Local returned HTTP {resp.status_code}: {body[:200]}"
-                )
+                raise RuntimeError(f"Foundry Local returned HTTP {resp.status_code}: {body[:200]}")
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
