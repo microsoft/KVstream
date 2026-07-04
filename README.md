@@ -1,8 +1,10 @@
 # KVStream
 
-**KVStream sits in front of your existing LLM runtime and fixes the biggest bottleneck in local inference: wasted KV cache memory and poor batching. By streaming KV allocation instead of reserving it upfront, KVStream enables paged attention, continuous batching, and significantly more concurrent requests on the same GPU.**
+**KVStream is an OpenAI-compatible proxy that sits in front of your existing LLM runtime and adds admission-control queuing, a continuous-batch scheduler, and a Python-level prefix hash cache — without modifying the backend or the model.**
 
 Works with Ollama, Foundry Local, llama.cpp, and LM Studio — no model changes required.
+
+> **Scope:** KVStream operates at the HTTP proxy layer. It does not own the backend's GPU memory or KV tensors. The real benefit is preventing runtime overload through admission control and batch-size enforcement. See [Supported Backends](#supported-backends) for an honest per-backend breakdown.
 
 [![CI](https://github.com/microsoft/KVstream/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/KVstream/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -13,25 +15,23 @@ Works with Ollama, Foundry Local, llama.cpp, and LM Studio — no model changes 
 
 ## Why KVStream?
 
-Local inference runtimes like **Ollama** and **Foundry Local** allocate KV cache memory **contiguously per sequence** — reserving the full `max_seq_len` upfront. This causes:
+When multiple clients hit a local LLM runtime simultaneously, the runtime accepts every request at once, degrades under load, and some requests time out or OOM. KVStream solves this by acting as an **admission-control gate** in front of the runtime.
 
-| Problem | Effect |
-|---|---|
-| **Internal fragmentation** | Unused VRAM inside each sequence's reserved block |
-| **Low concurrency** | Pool fills fast; only 1–3 parallel requests on 24 GB GPU |
-| **Head-of-line blocking** | Long prompts stall all other requests |
+KVStream sits in front of your existing runtime as a **transparent OpenAI-compatible proxy** and provides:
 
-KVStream sits in front of your existing runtime as a **transparent OpenAI-compatible proxy** and implements:
+| Feature | What it does | Applies to |
+|---|---|---|
+| **Admission-control scheduler** | Queues requests; admits only when a batch slot is free — backend is never flooded | All backends |
+| **Continuous batching** | Requests join the batch the moment a slot frees, not at the next full-batch boundary | All backends |
+| **Prefix hash cache** | Tracks shared prompt prefixes in a Python hash table; avoids re-allocating admission pages for duplicate prefixes | All backends (see note) |
+| **Virtual page accounting** | Per-sequence page table used for admission decisions and preemption ordering | All backends |
+| **Swap & preemption** | Low-priority sequences re-queued rather than dropped when the batch is full | All backends (accounting only for soft backends) |
 
-| Feature | What it does |
-|---|---|
-| **Streaming KV allocation** | Fixed-size KV pages allocated on demand, one slot per generated token — nothing reserved upfront |
-| **Continuous batching** | Iteration-level scheduler: requests join the batch the moment a slot frees, instead of overloading the runtime |
-| **Prefix KV cache** | Shared system prompts registered once and forked copy-on-write across requests |
-| **Swap & preemption** | Low-priority sequences spilled to a CPU page pool, not dropped |
-| **Hard KV inject** (llama.cpp) | Binary KV state save/restore via the `/slots` API |
+> **What KVStream does NOT do for Ollama / Foundry Local / LM Studio:** it cannot access or modify the backend's GPU memory. The page table is logical accounting only — the backend still receives and recomputes every full prompt on every request. No KV tensors are shared at the GPU level. The measurable gain is purely from admission control: preventing the runtime from being overwhelmed beyond its optimal concurrency.
 
-How far the concurrency gain goes depends on your GPU, model, and prompt mix — measure it on your own hardware with `kvstream bench` (see [Benchmarks](#benchmarks)).
+> **llama.cpp:** the `save_kv_state` / `restore_kv_state` methods are implemented in the backend adapter but are **not yet wired into the scheduler**. The current llama.cpp path sends `cache_prompt: true` and relies on llama.cpp's own internal caching.
+
+How much admission-control batching helps depends on your concurrency pattern and model — measure it on your own hardware with `kvstream bench` (see [Benchmarks](#benchmarks)).
 
 ---
 
@@ -44,28 +44,29 @@ flowchart TD
 
     subgraph Proxy["KVStream Proxy :8080"]
         direction TB
-        Sched["Continuous Batch<br/>Scheduler"]
-        Block["Block Manager<br/>(page alloc)"]
-        Prefix["Prefix KV Cache<br/>(dedup)"]
-        Pool["KV Page Pool (GPU)<br/>+ CPU Swap Buffer"]
-        Sched --> Pool
-        Block --> Pool
-        Prefix --> Pool
+        Sched["Continuous Batch Scheduler<br/><i>queues requests; enforces max batch size</i>"]
+        Block["Block Manager<br/><i>virtual page accounting (Python only)</i>"]
+        Prefix["Prefix Hash Cache<br/><i>tracks seen prefixes for admission decisions</i>"]
+        Sched --> Block
+        Block --> Prefix
     end
 
-    Proxy --> Ollama["Ollama<br/>:11434"]
-    Proxy --> Foundry["Foundry Local"]
-    Proxy --> Llama["llama.cpp / LM Studio"]
+    Proxy -->|"HTTP — full prompt forwarded"| Ollama["Ollama :11434<br/><i>owns its own KV cache</i>"]
+    Proxy -->|"HTTP — full prompt forwarded"| Foundry["Foundry Local<br/><i>ONNX — no KV API surface</i>"]
+    Proxy -->|"HTTP — full prompt forwarded<br/>cache_prompt: true"| Llama["llama.cpp<br/><i>/slots save/restore: planned</i>"]
+
+    note["⚠ No GPU memory is managed by KVStream.<br/>The block manager and prefix cache are<br/>Python data structures used for admission<br/>control only. Backends recompute all prompts."]
+    style note fill:#2a1a00,stroke:#cc6600,color:#ffcc88
 ```
 
 ### Request lifecycle
 
 1. A request arrives and is **queued by the continuous-batch scheduler** — it is admitted only when a batch slot and KV pages are available, so the backend runtime is never overloaded.
 2. On admission, KV pages are allocated for the prompt; from then on the page table **grows one slot per generated token** (streaming allocation) instead of reserving `max_tokens` upfront.
-3. If the prompt shares a prefix with an earlier request, the cached prefix's block table is **forked copy-on-write** — shared pages are never duplicated.
-4. When the request finishes, its prefix is registered for reuse and its pages return to the pool — the next queued request joins the batch on the scheduler's next tick (10 ms).
+3. If the prompt shares a prefix with an earlier request, KVStream records the match in its Python prefix hash table and skips re-allocating admission pages. The backend still receives and recomputes the full prompt — GPU-level prefix reuse depends on the backend's own caching (e.g. llama.cpp's `cache_prompt`).
+4. When the request finishes, its prefix hash is registered for future matching and its virtual pages return to the pool — the next queued request joins the batch on the scheduler's next tick (10 ms).
 
-> **Soft vs hard KV inject:** for Ollama, Foundry Local, and LM Studio the runtime owns its internal KV tensors; KVStream's page pool governs *admission and concurrency accounting* in front of it (soft inject). Only llama.cpp's `/slots` API allows true binary KV state save/restore (hard inject). See [Supported Backends](#supported-backends).
+> **Soft vs hard KV inject:** for Ollama, Foundry Local, and LM Studio the runtime owns its internal KV tensors and KVStream cannot access them — the page pool provides *admission and concurrency accounting* only (soft mode). llama.cpp exposes a `/slots` API that could allow binary KV state save/restore (hard mode), but this is **not yet wired into the scheduler**. The current llama.cpp path relies on llama.cpp's own `cache_prompt` flag. See [Supported Backends](#supported-backends).
 
 ---
 
@@ -116,7 +117,7 @@ pip install -e .
 kvstream serve --backend ollama --port 8080 --gpu-blocks 2048
 
 # With llama.cpp — run llama-server on :8081 so it doesn't clash with the
-# proxy's :8080 (full KV inject — zero recompute on cache hits)
+# proxy's :8080 (admission control + llama.cpp's own cache_prompt caching)
 kvstream serve --backend llamacpp --backend-url http://localhost:8081 --port 8080
 
 # Monitor live stats
@@ -140,7 +141,7 @@ from kvstream.backends import OllamaBackend
 
 engine = KVStreamEngine(
     backend=OllamaBackend(base_url="http://localhost:11434", model="llama3.2"),
-    num_gpu_blocks=2048,   # tune to your VRAM
+    num_gpu_blocks=2048,   # controls max queued sequences (not real VRAM for Ollama)
     block_size=16,
     max_batch_size=16,
 )
@@ -200,16 +201,16 @@ All fields also settable as environment variables: `KVSTREAM_BACKEND__TYPE=llama
 
 ## Supported Backends
 
-| Backend | Status | Hard KV inject | Notes |
+| Backend | Status | KV mode | What KVStream actually provides |
 |---|---|---|---|
-| **Ollama** | ✅ Stable | Soft | Uses llama.cpp slot keepalive |
-| **Foundry Local** | ✅ Stable | Soft | OpenAI-compat passthrough |
-| **llama.cpp server** | ✅ Stable | ✅ Hard | `/slots` save/restore API — true zero-recompute |
-| **LM Studio** | 🔶 Beta | Soft | OpenAI-compat passthrough |
+| **Ollama** | ✅ Stable | Soft | Admission control, request queuing, prefix hash tracking. Backend owns its own KV cache. |
+| **Foundry Local** | ✅ Stable | Soft | Admission control, request queuing. HTTP passthrough only — ONNX runtime; no KV API surface. |
+| **llama.cpp server** | ✅ Stable | Soft (hard: planned) | Admission control + sends `cache_prompt: true`. The `/slots` save/restore adapter exists but is not yet called by the scheduler. |
+| **LM Studio** | 🔶 Beta | Soft | Admission control, request queuing. HTTP passthrough only — no KV API surface. |
 
-**Soft KV inject**: KVStream manages the page table and deduplicates token prefixes. The backend still recomputes on a cache miss, but shared prefixes are sent only once.
+**Soft mode (all backends):** KVStream queues requests and enforces a maximum batch size. The backend receives and recomputes the full prompt on every request. No KV tensors are shared or transferred at the GPU level.
 
-**Hard KV inject (llama.cpp only)**: binary KV tensors are saved after a prefix is processed and byte-copied back for every subsequent request — true zero-recompute. Start llama.cpp with `--slots 8 --cont-batching` to enable.
+**Hard mode (llama.cpp — not yet active):** the `LlamaCppBackend` implements `save_kv_state` / `restore_kv_state` against the `/slots` API, but the scheduler does not yet call these methods. The backend currently benefits only from llama.cpp's own `cache_prompt` caching. Full KVStream-managed slot save/restore is a planned feature.
 
 ---
 
@@ -228,11 +229,17 @@ kvstream serve --backend ollama --port 8080
 kvstream bench --url http://localhost:8080 --concurrency 16 --total-requests 50
 ```
 
-The gain comes from **admission control + paged accounting**: instead of
-letting 16 concurrent requests overwhelm a runtime that degrades past ~4,
-KVStream batches them at the runtime's sweet spot, dedupes shared prefixes,
-and queues the rest — so all 16 complete instead of timing out or OOMing.
-Compare p50/p99 latency and the error count between the two runs.
+The gain comes from **admission control**: instead of letting 16 concurrent
+requests overwhelm a runtime that degrades past ~4, KVStream admits them at
+the runtime's optimal batch size and queues the rest — so all 16 complete
+instead of timing out or OOMing. Compare p50/p99 latency and the error count
+between the two runs.
+
+> **Context length matters.** The default bench parameters (`--prompt-len 128
+> --output-len 64`) use short, easily measurable contexts. At realistic agent
+> or RAG workloads (10k–100k tokens) pre-fill cost dominates and admission-
+> control gains shrink or disappear. Always benchmark at the context lengths
+> your workload actually uses.
 
 ---
 

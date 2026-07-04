@@ -1,6 +1,8 @@
 # KVStream — Integration Guide
 
-KVStream is a middleware layer that sits in front of any local LLM runtime (Ollama, Foundry Local, llama.cpp, LM Studio) and adds **paged KV-cache allocation**, **continuous batching**, and **prefix deduplication** without requiring changes to the backend or the client.
+KVStream is a middleware proxy that sits in front of any local LLM runtime (Ollama, Foundry Local, llama.cpp, LM Studio) and adds **admission-control queuing**, **a continuous-batch scheduler**, and **a Python-level prefix hash cache** without requiring changes to the backend or the client.
+
+> **What KVStream can and cannot do:** it operates at the HTTP proxy layer and has no access to the backend's GPU memory or KV tensors. Admission control and batch-size enforcement work across all backends. For Ollama, Foundry Local (ONNX), and LM Studio there is no KV manipulation API available — the page table KVStream maintains is logical accounting only, and the backend recomputes every full prompt on every request.
 
 ```
 Your app  ──► KVStream proxy (port 8080)  ──►  Ollama / Foundry Local / llama.cpp
@@ -36,17 +38,14 @@ pip install kvstream
 
 | Extra | What it adds | When to install |
 |-------|-------------|-----------------|
-| `kvstream[gpu]` | PyTorch + NumPy | llama.cpp hard-inject mode (GPU tensor pool) |
-| `kvstream[flash]` | flash-attn | Faster attention kernel for hard-inject |
-| `kvstream[xformers]` | xformers | Alternative efficient attention |
+| `kvstream[gpu]` | PyTorch + NumPy | Required only if you want the `PagedKVCache` tensor pool (allocated for llama.cpp but not yet actively used — see [Section 5](#5-backend-configuration)) |
+| `kvstream[flash]` | flash-attn | Roadmap — not used by the current attention kernel |
+| `kvstream[xformers]` | xformers | Roadmap — not used by the current attention kernel |
 | `kvstream[dev]` | pytest, ruff, mypy | Development / contributing |
 
 ```bash
-# With GPU tensor pool (llama.cpp hard-inject)
+# Install with optional torch dependency
 pip install "kvstream[gpu]"
-
-# Full install — everything
-pip install "kvstream[gpu,flash]"
 ```
 
 ---
@@ -388,7 +387,7 @@ backend = OllamaBackend(
 )
 ```
 
-**Soft-inject backend** — KVStream manages logical page tables for admission control and prefix matching, while Ollama handles its own internal KV cache. The `PagedKVCache` tensor pool is not allocated.
+**Soft mode** — KVStream manages logical page tables for admission control and request queuing. Ollama owns its internal KV cache entirely; KVStream has no access to it. The `PagedKVCache` tensor pool is not allocated. Ollama's `keep_alive` parameter keeps the model loaded between requests; KVStream passes it through.
 
 ### Foundry Local
 
@@ -416,7 +415,7 @@ backend = LlamaCppBackend(
 )
 ```
 
-**Hard-inject backend** — llama.cpp exposes a `/slots` API that allows KVStream to save and restore raw KV state. This enables true zero-recompute prefix caching. Start the server with:
+**llama.cpp backend** — KVStream sends `cache_prompt: true` on every request, which activates llama.cpp's own internal prefix caching. The `LlamaCppBackend` adapter also implements `save_kv_state` / `restore_kv_state` against the `/slots` API, but the scheduler does **not yet call these methods** — full KVStream-managed slot save/restore is a planned feature. For now, KVStream provides admission control and relies on llama.cpp's native caching. Start the server with:
 
 ```bash
 ./llama-server -m model.gguf --slots 8 --cont-batching --port 8081
@@ -511,7 +510,7 @@ The GPU block pool is the most important tuning knob. Use these guidelines for s
 | 16 GB | 256 | llama3-8b (q8), codellama-13b |
 | 24 GB | 512 | llama3-70b (q4), mixtral-8x7b |
 
-For **llama.cpp hard-inject mode** the pool is backed by real tensors. Use the block size formula to estimate:
+For **llama.cpp**, a `PagedKVCache` tensor pool is allocated when `torch` is available and `supports_hard_kv_inject()` returns `True`. The pool is currently allocated but not actively used for slot save/restore (that wiring is planned). The block size formula is provided for capacity planning when that feature becomes active:
 
 ```python
 # Memory per block (bytes):
@@ -553,13 +552,14 @@ engine = KVStreamEngine(
 
 ## 8. Prefix cache
 
-The prefix cache deduplicates the KV computation for any shared token prefix (system prompts, few-shot examples, RAG preambles).
+The prefix cache tracks shared prompt prefixes in a Python hash table to speed up admission and reduce duplicate page allocations.
 
 ### How it works
 
-1. After a request's prefill phase completes, KVStream hashes the prompt tokens in block-aligned chunks and stores the canonical block table.
-2. On the next request with the same prefix, the child sequence **forks** the canonical block table via copy-on-write — no re-computation.
-3. Entries expire after `ttl_seconds`. Manual eviction is also possible.
+1. After a request's prefill phase completes, KVStream hashes the prompt tokens in block-aligned chunks and stores the canonical virtual block table.
+2. On the next request with the same prefix, the child sequence forks the virtual block table — this skips re-allocating admission-accounting pages and allows the request to be admitted without a full page setup.
+3. **Important:** for all current backends the prefix cache has **no effect on GPU-level computation** — the backend still receives and recomputes the full prompt. Actual pre-fill reuse depends on the backend's own caching (e.g. llama.cpp's `cache_prompt`, Ollama's `keep_alive`). Full KVStream-managed KV reuse via the `/slots` API is planned for llama.cpp.
+4. Entries expire after `ttl_seconds`. Manual eviction is also possible.
 
 ### Maximising cache hits
 
@@ -592,9 +592,10 @@ async def ask(q: str) -> str:
     return r.choices[0].message.content
 
 async def main():
-    # First call — prefix computed and cached
+    # First call — prefix hash stored in KVStream's admission table
     print(await ask("What is a generator?"))
-    # Subsequent calls — prefix is reused, faster time-to-first-token
+    # Subsequent calls — admission pages reused (no GPU-level reuse;
+    # any TTFT benefit comes from Ollama's own keep_alive caching)
     print(await ask("What is a context manager?"))
     print(await ask("What is a decorator?"))
 
@@ -851,15 +852,20 @@ engine = KVStreamEngine(
 )
 ```
 
-### Hard KV inject (advanced)
+### Hard KV inject (planned — not yet active)
 
-For backends that support saving and restoring raw KV state (like llama.cpp `/slots`), override `supports_hard_kv_inject`, `save_kv_state`, and `restore_kv_state`:
+llama.cpp exposes a `/slots` API for raw KV state save/restore per slot. `LlamaCppBackend` already implements `save_kv_state` and `restore_kv_state` against this API, and returning `True` from `supports_hard_kv_inject()` causes the engine to allocate a `PagedKVCache` tensor pool. However, the engine does **not yet call** these methods — wiring them into the slot-management and prefix-restore path is a planned contribution.
+
+If you are implementing a custom backend that provides a slot save/restore API, the interface is:
 
 ```python
 class HardInjectBackend(BaseBackend):
 
     def supports_hard_kv_inject(self) -> bool:
-        return True  # Enables PagedKVCache tensor pool allocation
+        # Returning True allocates the PagedKVCache tensor pool.
+        # Note: the engine does not yet call save_kv_state / restore_kv_state
+        # automatically — that wiring is planned.
+        return True
 
     async def save_kv_state(self, seq_id: str, slot_id: int, path: str) -> bool:
         """Save KV state for a sequence slot to a file."""
@@ -901,6 +907,8 @@ kvstream bench \
   --output-len 64 \
   --total-requests 100
 ```
+
+> **Context length matters.** The defaults above (`--prompt-len 128`, `--output-len 64`) use short, easily measurable contexts. At realistic agent or RAG workloads (10k–100k tokens) pre-fill cost dominates completely and the admission-control benefit shrinks or disappears. Always benchmark at the context lengths your actual workload requires before drawing conclusions.
 
 Example output:
 
