@@ -61,10 +61,10 @@ flowchart TD
 
 ### Request lifecycle
 
-1. A request arrives and is **queued by the continuous-batch scheduler** — it is admitted only when a batch slot and KV pages are available, so the backend runtime is never overloaded.
-2. On admission, KV pages are allocated for the prompt; from then on the page table **grows one slot per generated token** (streaming allocation) instead of reserving `max_tokens` upfront.
+1. A request arrives and is **queued by the continuous-batch scheduler** — it is admitted only when a batch slot and admission-accounting pages are available, so the backend runtime is never overloaded.
+2. On admission, virtual accounting pages are allocated for the prompt to track its position in the queue; from then on the page counter **grows one slot per generated token** instead of pre-allocating for `max_tokens`. No KV tensor data is written — this is admission accounting only.
 3. If the prompt shares a prefix with an earlier request, KVStream records the match in its Python prefix hash table and skips re-allocating admission pages. The backend still receives and recomputes the full prompt — GPU-level prefix reuse depends on the backend's own caching (e.g. llama.cpp's `cache_prompt`).
-4. When the request finishes, its prefix hash is registered for future matching and its virtual pages return to the pool — the next queued request joins the batch on the scheduler's next tick (10 ms).
+4. When the request finishes, its prefix hash is registered for future matching and its virtual pages return to the pool — the next queued request joins the batch on the scheduler's next tick (10 ms under load, 100 ms when idle).
 
 > **Soft vs hard KV inject:** for Ollama, Foundry Local, and LM Studio the runtime owns its internal KV tensors and KVStream cannot access them — the page pool provides *admission and concurrency accounting* only (soft mode). llama.cpp exposes a `/slots` API that could allow binary KV state save/restore (hard mode), but this is **not yet wired into the scheduler**. The current llama.cpp path relies on llama.cpp's own `cache_prompt` flag. See [Supported Backends](#supported-backends).
 
