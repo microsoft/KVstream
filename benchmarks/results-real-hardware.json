@@ -1,0 +1,60 @@
+{
+  "target": "http://127.0.0.1:64164",
+  "model": "Phi-3-mini-4k-instruct-generic-gpu:2",
+  "runtime_model": null,
+  "requests": 40,
+  "client_concurrency": 16,
+  "calibrated_budget_tokens": 48,
+  "calibrated": true,
+  "results": [
+    {
+      "label": "direct to runtime",
+      "completed": 40,
+      "errors": 0,
+      "refused_503": 0,
+      "p50_ms": 38665,
+      "p95_ms": 44726,
+      "p99_ms": 44729,
+      "mean_ms": 34555,
+      "wall_seconds": 90.68,
+      "throughput_rps": 0.44,
+      "success_rate": 1.0
+    },
+    {
+      "label": "through KVStream",
+      "completed": 40,
+      "errors": 0,
+      "refused_503": 0,
+      "p50_ms": 19127,
+      "p95_ms": 21092,
+      "p99_ms": 21468,
+      "mean_ms": 16101,
+      "wall_seconds": 49.67,
+      "throughput_rps": 0.81,
+      "success_rate": 1.0
+    }
+  ],
+  "runtime_peak_direct": null,
+  "runtime_peak_through_kvstream": null,
+  "gateway_admission": {
+    "unit": "tokens",
+    "budget": 48,
+    "in_flight": 0,
+    "utilization": 0.0,
+    "waiting": 0,
+    "max_queue_depth": 1000,
+    "active": 0,
+    "overshoots": 33,
+    "reclaimed": 0,
+    "draining": false,
+    "queue": {
+      "depth": 0,
+      "head_cost": 0,
+      "oldest_wait_seconds": 0.0,
+      "admitted": 39,
+      "timed_out": 0,
+      "rejected": 0,
+      "peak_depth": 15
+    }
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "target": "simulated runtime",
+  "model": "sim-model",
+  "arm": "both",
+  "runtime_model": {
+    "optimal_concurrency": 4,
+    "hard_limit": 16
+  },
+  "requests": 120,
+  "client_concurrency": 32,
+  "calibrated_budget_tokens": 688,
+  "calibrated": true,
+  "results": [
+    {
+      "label": "direct to runtime",
+      "completed": 24,
+      "errors": 0,
+      "refused_503": 96,
+      "p50_ms": 440,
+      "p95_ms": 5685,
+      "p99_ms": 5736,
+      "mean_ms": 1283,
+      "wall_seconds": 6.29,
+      "throughput_rps": 3.82,
+      "success_rate": 0.2
+    },
+    {
+      "label": "through KVStream",
+      "completed": 120,
+      "errors": 0,
+      "refused_503": 0,
+      "p50_ms": 3938,
+      "p95_ms": 6229,
+      "p99_ms": 6313,
+      "mean_ms": 3988,
+      "wall_seconds": 17.39,
+      "throughput_rps": 6.9,
+      "success_rate": 1.0
+    }
+  ],
+  "runtime_peak_direct": {
+    "optimal_concurrency": 4,
+    "hard_limit": 16,
+    "peak_in_flight": 16,
+    "served": 24,
+    "refused": 96
+  },
+  "runtime_peak_through_kvstream": {
+    "optimal_concurrency": 4,
+    "hard_limit": 16,
+    "peak_in_flight": 5,
+    "served": 121,
+    "refused": 0
+  },
+  "gateway_admission": {
+    "unit": "tokens",
+    "budget": 688,
+    "in_flight": 0,
+    "utilization": 0.0,
+    "waiting": 0,
+    "max_queue_depth": 1000,
+    "active": 0,
+    "overshoots": 0,
+    "reclaimed": 0,
+    "draining": false,
+    "queue": {
+      "depth": 0,
+      "head_cost": 0,
+      "oldest_wait_seconds": 0.0,
+      "admitted": 119,
+      "timed_out": 0,
+      "rejected": 0,
+      "peak_depth": 31
+    },
+    "drain_rate_per_second": 13715.841,
+    "completions": 120,
+    "queued_cost": 0,
+    "hopeless_rejections": 0
+  },
+  "gateway_health": {
+    "backend_serving": true,
+    "readiness": {
+      "ready": true,
+      "detail": "completed a 1-token generation",
+      "latency_seconds": 0.0,
+      "age_seconds": 0.0,
+      "probed": true
+    },
+    "circuit_breaker": {
+      "enabled": true,
+      "state": "closed",
+      "consecutive_failures": 0,
+      "trips": 0,
+      "fast_failures": 0,
+      "last_error": "",
+      "retry_after_seconds": 0
+    },
+    "drift": {
+      "state": "unknown",
+      "baseline_seconds_per_token": 0.0,
+      "observed_seconds_per_token": 0.0002,
+      "ratio": 0.0,
+      "worst_ratio": 0.0,
+      "samples": 120,
+      "warn_ratio": 3.0
+    }
+  }
+}

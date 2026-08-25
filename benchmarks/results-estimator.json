@@ -1,0 +1,88 @@
+{
+  "reference": "cl100k_base",
+  "seed": 20260824,
+  "samples_per_shape": 200,
+  "train_fraction": 0.5,
+  "held_out_samples": 400,
+  "estimators": [
+    {
+      "name": "naive chars/4",
+      "samples": 400,
+      "mean_abs_error": 0.1646,
+      "bias": 0.0317,
+      "under_rate": 0.5675,
+      "worst_under": -0.2292
+    },
+    {
+      "name": "KVStream, uncalibrated",
+      "samples": 400,
+      "mean_abs_error": 0.1914,
+      "bias": 0.1384,
+      "under_rate": 0.3625,
+      "worst_under": -0.1842
+    },
+    {
+      "name": "KVStream, calibrated",
+      "samples": 400,
+      "mean_abs_error": 0.068,
+      "bias": 0.052,
+      "under_rate": 0.1625,
+      "worst_under": -0.1579
+    }
+  ],
+  "calibrated_by_shape": {
+    "prose": {
+      "name": "prose",
+      "samples": 100,
+      "mean_abs_error": 0.0734,
+      "bias": 0.0683,
+      "under_rate": 0.07,
+      "worst_under": -0.0769
+    },
+    "json": {
+      "name": "json",
+      "samples": 100,
+      "mean_abs_error": 0.0172,
+      "bias": 0.0142,
+      "under_rate": 0.12,
+      "worst_under": -0.0215
+    },
+    "code": {
+      "name": "code",
+      "samples": 100,
+      "mean_abs_error": 0.1516,
+      "bias": 0.0997,
+      "under_rate": 0.29,
+      "worst_under": -0.1579
+    },
+    "chat": {
+      "name": "chat",
+      "samples": 100,
+      "mean_abs_error": 0.0299,
+      "bias": 0.0257,
+      "under_rate": 0.17,
+      "worst_under": -0.0285
+    }
+  },
+  "learned": {
+    "chars_per_token": 4.069,
+    "units_per_token": 1.22,
+    "initial_chars_per_token": 4.0,
+    "safety_factor": 1.0,
+    "samples": 400,
+    "calibrated": true
+  },
+  "safety": {
+    "needed_for_zero_under": 1.188,
+    "under_rate_by_factor": {
+      "1.0": 0.1625,
+      "1.1": 0.025,
+      "1.25": 0.0,
+      "1.5": 0.0,
+      "2.0": 0.0
+    }
+  },
+  "sanity": {
+    "estimate_tokens_is_pure": true
+  }
+}

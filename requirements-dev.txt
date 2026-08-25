@@ -1,0 +1,25 @@
+# Generated from pyproject.toml by tools/sync_requirements.py — do not edit.
+# pyproject.toml is the source of truth; run the script after changing it.
+#
+# Everything needed to develop, test, benchmark and build the docs.
+# Install the package itself in editable mode, then the extras:
+#     pip install -r requirements-dev.txt
+#
+# Playwright additionally needs a browser: `playwright install chromium`.
+
+-e .
+
+# [dev]
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+ruff>=0.8.0
+mypy>=1.13.0
+types-PyYAML>=6.0.0
+
+# [bench]
+tiktoken>=0.7.0
+
+# [docs]
+python-docx>=1.1.0
+markdown-it-py>=3.0.0
+playwright>=1.40.0
