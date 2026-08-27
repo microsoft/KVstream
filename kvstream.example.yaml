@@ -1,0 +1,130 @@
+# KVStream — example configuration for Microsoft Foundry Local.
+#
+# Copy to `kvstream.yaml` (auto-loaded from the working directory) or pass with
+# `kvstream serve --config path/to/file.yaml`. Every field is also settable via
+# environment variables using the KVSTREAM_ prefix and `__` for nesting, e.g.
+#   KVSTREAM_ADMISSION__MODE=tokens
+#   KVSTREAM_BACKEND__MODEL=phi-3-mini
+
+host: 127.0.0.1          # bind address (no auth layer — keep on loopback)
+port: 8080               # gateway listen port
+drain_timeout_seconds: 30.0   # on shutdown: turn away the queue, let in-flight finish
+
+# Declared KV geometry per model, used ONLY for relative costing between models
+# (proposal §5.2). The budget is calibrated for backend.model; another model is
+# charged in proportion to its per-token KV size. Undeclared models weigh 1.0,
+# i.e. exactly as they were costed before, so this whole section is optional.
+# models:
+#   phi-3-mini:
+#     num_hidden_layers: 32
+#     num_key_value_heads: 32      # KV heads, not attention heads (GQA matters)
+#     head_dim: 96                 # or give hidden_size and it is derived
+#     torch_dtype: float16
+
+backend:
+  base_url: http://localhost:5273   # starting guess; auto-discovered if wrong
+  model: phi-3-mini                 # a model id returned by Foundry's /v1/models
+  timeout_seconds: 120.0
+  discover: true                    # auto-discover Foundry Local's ephemeral port
+  discovery_cooldown_seconds: 5.0   # min gap between full localhost scans
+  request_usage: true               # ask for real token counts (stream_options.include_usage)
+  device: auto                      # accelerator label used to key calibration records;
+                                    # set explicitly (e.g. "npu") when it matters
+  # Backend resolution order: explicit URL -> foundry CLI -> localhost scan -> error.
+  # Setting base_url here (or via --backend-url / KVSTREAM_BACKEND__BASE_URL) counts
+  # as explicit and pins it, skipping discovery entirely. pin_url overrides that
+  # either way; leave it unset for the automatic behaviour.
+  # pin_url: true
+  use_foundry_cli: auto             # auto | always | never — "auto" shells out to the
+                                    # `foundry` CLI on a host, never inside a container
+  # foundry_cli_path: C:\path\to\foundry.exe
+  foundry_cli_timeout_seconds: 5.0
+  # api_key: sk-...              # static bearer token sent upstream (rarely needed)
+  forward_authorization: true    # pass the caller's Authorization header through
+
+  # Readiness. Answering /v1/models proves a process is alive, not that it can
+  # generate a token — measured against a real Foundry Local that served
+  # /v1/models in 4ms while a 4-token generation never returned. The probe is a
+  # real generation, so it is cached and single-flighted.
+  probe_readiness: true
+  readiness_interval_seconds: 30.0
+  readiness_timeout_seconds: 15.0
+
+  # Circuit breaker. Without it a stalled backend is rediscovered one request at
+  # a time: each arrival waits the full backend timeout and the admission queue
+  # fills with work that can never complete.
+  circuit_breaker: true
+  circuit_breaker_failures: 5
+  circuit_breaker_reset_seconds: 30.0
+
+admission:
+  # "concurrency" works out of the box (a request-count cap).
+  # "tokens" uses a calibrated KV-capacity budget (run `kvstream calibrate` first).
+  mode: concurrency
+  max_concurrency: 8                # used in concurrency mode
+  budget_tokens: 0                  # used in tokens mode; 0 => read from calibration store
+  # How long a request may queue before HTTP 503. 120s is a long time to hold an
+  # interactive client; if your callers will not wait that long, neither should
+  # this. Fast shedding refines the decision, it does not replace it.
+  admission_timeout_seconds: 120.0
+  max_queue_depth: 1000             # reject beyond this many queued requests
+  # Token-cost estimation. KVStream has no tokenizer, so it estimates — but it
+  # self-calibrates from real `usage` counts when Foundry Local reports them.
+  chars_per_token: 4.0              # starting ratio; refined at runtime
+  learn_token_ratio: true           # learn the true ratio from backend usage
+  token_safety_factor: 1.0          # >1.0 buys headroom against under-estimation
+  # Fraction of max_tokens reserved up front. 1.0 reserves the worst case and can
+  # never breach the budget. Lower values reserve less and reclaim live, but a
+  # generation that outgrows its reservation is topped up rather than truncated —
+  # tune against kvstream_reservation_overshoot_total, not by guesswork.
+  reserve_completion_ratio: 1.0
+  # Generation length assumed when a request omits max_tokens. Used only to cost
+  # the request — it is never sent upstream, so the model's own default applies.
+  default_max_tokens: 512
+  # Warn when served latency per token exceeds the calibration-time baseline by
+  # this factor. A budget measured on a fresh runtime stops describing one that
+  # has degraded — and on real hardware, nothing else noticed.
+  drift_warn_ratio: 3.0
+  drift_min_samples: 20
+  # Shed load fast. A queued request re-predicts whether the queue can still
+  # reach it in time and gives up early rather than holding a connection until
+  # admission_timeout_seconds. Measured on real hardware: 503s went from a flat
+  # 120.1s to a median of 8.1s.
+  reject_when_hopeless: true
+  recheck_interval_seconds: 1.0
+  rate_window_seconds: 10.0
+  min_rate_samples: 5
+  # Only refuse when the deadline is missed by this factor, and only when the
+  # system is genuinely saturated. Without that bias the predictor starves
+  # itself: rejecting prevents completions, so the measured rate never recovers.
+  hopeless_margin: 1.5
+  # Budgets are keyed by (model, device, CLI generation, Foundry version); a
+  # record measured elsewhere is not applied silently.
+  calibration_store: .kvstream/calibration.json
+
+routes:
+  # Proxying only chat leaves the other paths unprotected — clients route around
+  # the gateway, which defeats admission control.
+  embeddings: true          # admitted on the KV-token budget, cost = input tokens
+  transcriptions: true      # admitted on its own plain concurrency limit (below)
+  completions: true         # legacy /v1/completions; Foundry may answer 404, passed through
+  # Audio has no honest token cost measurable at the HTTP layer, so it gets a
+  # separate limiter rather than a made-up KV cost.
+  audio_max_concurrency: 2
+  audio_max_upload_mb: 25
+
+cache:
+  enabled: false          # opt-in; only caches deterministic (temperature 0) requests
+  ttl_seconds: 900
+  max_entries: 1024
+  # Honour per-request `Cache-Control: no-store / no-cache` (and x-kvstream-cache),
+  # so a caller can opt one request out without reconfiguring the gateway.
+  respect_request_headers: true
+  max_entry_bytes: 1000000   # skip responses too big to be worth the room
+
+coalesce:
+  enabled: true           # merge identical concurrent deterministic requests,
+                          # on the streaming path as well as the non-streaming one
+
+observability:
+  log_level: INFO
