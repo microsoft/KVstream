@@ -16,8 +16,8 @@ from kvstream.app import build_app
 from kvstream.backend.foundry import Token
 from kvstream.config import Settings
 
-PROMPT = "a" * 3000          # 3,000 characters
-REAL_PROMPT_TOKENS = 1000    # => a true ratio of 3.0 chars/token
+PROMPT = "a" * 3000  # 3,000 characters
+REAL_PROMPT_TOKENS = 1000  # => a true ratio of 3.0 chars/token
 REAL_COMPLETION_TOKENS = 7
 
 

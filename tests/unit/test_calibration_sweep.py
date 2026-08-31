@@ -119,9 +119,7 @@ def test_find_knee_still_behaves():
 async def test_the_sweep_warms_up_before_measuring(tmp_path, monkeypatch):
     """A cold first request must not become the baseline everything is judged against."""
     backend = FakeBackend(ceiling=8, cold=10.0)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=1, refine=False)
@@ -156,9 +154,7 @@ async def test_bisection_narrows_the_knee(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=2, trials=4, warmup=0, refine=False)
@@ -169,9 +165,7 @@ async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_the_sweep_uses_mixed_request_shapes(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=0, refine=False)
@@ -190,7 +184,7 @@ async def test_the_result_is_stored_under_the_full_key(tmp_path, monkeypatch):
     hit = lookup_budget(store, key)
     assert hit.match == "exact"
     assert hit.budget_tokens == budget
-    assert hit.record["sweep"]          # the evidence is kept with the number
+    assert hit.record["sweep"]  # the evidence is kept with the number
     assert hit.age_seconds >= 0
 
 

@@ -111,7 +111,7 @@ async def test_reclaim_is_visible_in_status_and_metrics(token_mode):
 async def test_concurrency_mode_reclaims_nothing():
     """Live accounting is a token-mode concept; slots are indivisible."""
     settings = Settings()
-    settings.backend.model = "stub-model"          # default mode: concurrency
+    settings.backend.model = "stub-model"  # default mode: concurrency
     app = build_app(settings)
     app.state.gateway.backend = StubBackend()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
