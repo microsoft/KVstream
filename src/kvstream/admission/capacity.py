@@ -87,9 +87,7 @@ class RequestCost:
         """Footprint reserved up front when only part of ``max_tokens`` is claimed."""
         if reserve_ratio >= 1.0:
             return self.tokens
-        return self._weighted(
-            self.prompt_tokens + ceil(self.max_tokens * reserve_ratio)
-        )
+        return self._weighted(self.prompt_tokens + ceil(self.max_tokens * reserve_ratio))
 
     def live_tokens(self, generated_tokens: int) -> int:
         """Footprint actually occupied once ``generated_tokens`` have arrived."""
@@ -339,9 +337,7 @@ class CapacityManager:
             "unit": self._unit,
             "budget": self._budget,
             "in_flight": self._in_flight,
-            "utilization": (
-                round(self._in_flight / self._budget, 3) if self._budget else 0.0
-            ),
+            "utilization": (round(self._in_flight / self._budget, 3) if self._budget else 0.0),
             "waiting": len(self._queue),
             "max_queue_depth": self._max_queue_depth,
             "active": len(self._reservations),
@@ -453,10 +449,7 @@ class CapacityManager:
                     # The margin is deliberate slack: only refuse when the
                     # prediction says the deadline will be missed by a wide
                     # margin, never on a marginal call.
-                    if (
-                        self._may_reject()
-                        and predicted > left * self._hopeless_margin > 0
-                    ):
+                    if self._may_reject() and predicted > left * self._hopeless_margin > 0:
                         self._discard(waiter)
                         self._q.timed_out -= 1  # counted below as hopeless
                         self._hopeless_rejections += 1

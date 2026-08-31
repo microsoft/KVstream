@@ -43,9 +43,7 @@ def _app(**cache_overrides):
 @pytest_asyncio.fixture
 async def client():
     app, gw, stub = _app(enabled=True)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, gw, stub
 
 
@@ -196,15 +194,9 @@ async def test_no_store_skips_the_cache_in_both_directions():
         "messages": [{"role": "user", "content": "x"}],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        await c.post(
-            "/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"}
-        )
-        await c.post(
-            "/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
+        await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
         # Nothing was written, so a normal request still misses.
         await c.post("/v1/chat/completions", json=body)
     assert stub.once_calls == 3
@@ -218,9 +210,7 @@ async def test_no_cache_refetches_but_still_refreshes_the_entry():
         "messages": [{"role": "user", "content": "x"}],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)  # miss, stores
         await c.post(
             "/v1/chat/completions", json=body, headers={"Cache-Control": "no-cache"}
@@ -237,13 +227,9 @@ async def test_the_kvstream_header_works_too():
         "messages": [{"role": "user", "content": "x"}],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
-        await c.post(
-            "/v1/chat/completions", json=body, headers={"x-kvstream-cache": "no-store"}
-        )
+        await c.post("/v1/chat/completions", json=body, headers={"x-kvstream-cache": "no-store"})
     assert stub.once_calls == 2
 
 
@@ -255,13 +241,9 @@ async def test_request_headers_can_be_ignored_by_policy():
         "messages": [{"role": "user", "content": "x"}],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
-        await c.post(
-            "/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"}
-        )
+        await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
     assert stub.once_calls == 1  # the directive was not honoured
 
 
@@ -275,9 +257,7 @@ async def test_an_oversized_response_is_not_cached():
         "messages": [{"role": "user", "content": "x"}],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
         await c.post("/v1/chat/completions", json=body)
         metrics = (await c.get("/metrics")).text

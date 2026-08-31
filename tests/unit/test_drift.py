@@ -146,8 +146,6 @@ def test_a_configured_budget_has_no_baseline():
 def test_a_v1_record_without_per_token_data_has_no_baseline():
     """Old sweeps predate the normalised signal; they cannot supply one."""
     provenance = {
-        "lookup": {
-            "record": {"sweep": [{"concurrency": 1, "p99_seconds": 0.4, "errors": 0}]}
-        }
+        "lookup": {"record": {"sweep": [{"concurrency": 1, "p99_seconds": 0.4, "errors": 0}]}}
     }
     assert baseline_from_provenance(provenance) == 0.0

@@ -189,9 +189,7 @@ class FoundryClient:
             "scans": self.scans,
             "resolutions": self.resolutions,
             "usage_reporting": self._use_stream_options,
-            "resolution": (
-                self.last_resolution.as_dict() if self.last_resolution else None
-            ),
+            "resolution": (self.last_resolution.as_dict() if self.last_resolution else None),
             "foundry_cli": self.cli.as_dict(),
         }
 
@@ -224,8 +222,7 @@ class FoundryClient:
             # Another coroutine may have re-resolved while we waited.
             if (
                 self._resolved_url
-                and await discovery.probe_url(self._client, self._resolved_url)
-                is not None
+                and await discovery.probe_url(self._client, self._resolved_url) is not None
             ):
                 return self._resolved_url
 
@@ -233,10 +230,7 @@ class FoundryClient:
             # listening port. When the backend is simply down, that must not
             # happen once per inbound request.
             now = asyncio.get_event_loop().time()
-            if (
-                self._last_scan_at is not None
-                and (now - self._last_scan_at) < self._cooldown
-            ):
+            if self._last_scan_at is not None and (now - self._last_scan_at) < self._cooldown:
                 logger.debug(
                     "resolution on cooldown (%.1fs remaining); using last known URL",
                     self._cooldown - (now - self._last_scan_at),
@@ -368,9 +362,7 @@ class FoundryClient:
             raise self.unreachable(url, exc) from exc
         if resp.status_code >= 400:
             detail = resp.text
-            raise FoundryError(
-                f"Foundry Local returned HTTP {resp.status_code}: {detail[:200]}"
-            )
+            raise FoundryError(f"Foundry Local returned HTTP {resp.status_code}: {detail[:200]}")
         try:
             data = resp.json()
         except ValueError as exc:
@@ -457,9 +449,7 @@ class FoundryClient:
     async def list_models(self) -> list[str]:
         try:
             url = await self.resolve_url()
-            r = await self._client.get(
-                f"{url}/v1/models", timeout=5.0, headers=self._headers()
-            )
+            r = await self._client.get(f"{url}/v1/models", timeout=5.0, headers=self._headers())
             r.raise_for_status()
             return [m["id"] for m in r.json().get("data", [])]
         except Exception:  # noqa: BLE001

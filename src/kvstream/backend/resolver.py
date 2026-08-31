@@ -152,14 +152,10 @@ class BackendResolver:
             client, self.configured_url, self.exclude_ports, prefer_model=self.model
         )
         if found:
-            return Resolution(
-                found, SOURCE_SCAN, detail="localhost scan", attempts=attempts
-            )
+            return Resolution(found, SOURCE_SCAN, detail="localhost scan", attempts=attempts)
 
         # 4. Failure, with a command the operator can actually run.
-        return Resolution(
-            None, SOURCE_NONE, detail=self.failure_hint(), attempts=attempts
-        )
+        return Resolution(None, SOURCE_NONE, detail=self.failure_hint(), attempts=attempts)
 
     def failure_hint(self) -> str:
         """An actionable message for the CLI generation actually detected."""

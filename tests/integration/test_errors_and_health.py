@@ -77,9 +77,7 @@ def _app(backend) -> tuple:
 @pytest_asyncio.fixture
 async def broken():
     app, gw = _app(BrokenBackend())
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, gw
 
 
@@ -116,9 +114,7 @@ async def test_backend_failure_releases_the_reservation(broken):
 @pytest.mark.asyncio
 async def test_malformed_backend_body_is_502(broken):
     app, _ = _app(EmptyBackend())
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/v1/chat/completions", json=PAYLOAD)
     assert r.status_code == 502
     assert "no choices" in r.json()["error"]["message"]
@@ -156,9 +152,7 @@ async def test_validation_errors_use_the_openai_envelope(broken):
 async def test_health_reports_degraded_in_the_status_line():
     """G-33: orchestrators key on the code, not the JSON."""
     app, _ = _app(BrokenBackend(healthy=False))
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
     assert r.status_code == 503
     assert r.json()["backend_healthy"] is False
@@ -171,9 +165,7 @@ async def test_health_is_200_only_when_the_backend_actually_serves():
     from stubs import StubBackend
 
     app, _ = _app(StubBackend())
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
     body = r.json()
     assert r.status_code == 200
@@ -192,9 +184,7 @@ async def test_reachable_but_not_serving_is_degraded():
     generation never returned. Liveness alone said everything was fine.
     """
     app, _ = _app(BrokenBackend(healthy=True))  # /v1/models ok, generation fails
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
     body = r.json()
     assert r.status_code == 503
@@ -211,9 +201,7 @@ async def test_readiness_is_cached_so_the_probe_is_not_load():
 
     backend = StubBackend()
     app, _ = _app(backend)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         for _ in range(5):
             await c.get("/health")
         cached = backend.once_calls

@@ -13,9 +13,7 @@ import pytest
 from kvstream.admission.capacity import CapacityManager, RequestCost
 
 
-def _mgr(
-    budget: int = 1000, unit: str = "tokens", reserve_ratio: float = 1.0
-) -> CapacityManager:
+def _mgr(budget: int = 1000, unit: str = "tokens", reserve_ratio: float = 1.0) -> CapacityManager:
     return CapacityManager(
         budget=budget,
         unit=unit,

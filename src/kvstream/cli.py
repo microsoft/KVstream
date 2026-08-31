@@ -75,9 +75,7 @@ def serve(
     host: str | None = typer.Option(None, help="Bind address"),
     port: int | None = typer.Option(None, help="Gateway port"),
     model: str | None = typer.Option(None, help="Foundry Local model id"),
-    backend_url: str | None = typer.Option(
-        None, "--backend-url", help="Foundry Local base URL"
-    ),
+    backend_url: str | None = typer.Option(None, "--backend-url", help="Foundry Local base URL"),
     mode: str | None = typer.Option(None, help="admission mode: concurrency | tokens"),
     max_concurrency: int | None = typer.Option(None, help="concurrency-mode limit"),
 ) -> None:
@@ -171,9 +169,7 @@ def calibrate(
         "Defaults to a derived platform string.",
     ),
     max_concurrency: int = typer.Option(32, help="highest sweep concurrency"),
-    trials: int = typer.Option(
-        3, help="repeats per sweep point (pooled before the percentile)"
-    ),
+    trials: int = typer.Option(3, help="repeats per sweep point (pooled before the percentile)"),
     warmup: int = typer.Option(1, help="warm-up requests before measuring"),
     refine: bool = typer.Option(
         True,

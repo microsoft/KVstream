@@ -106,9 +106,7 @@ class DriftMonitor:
                 self._baseline,
             )
         elif self._state == OK and previous == DEGRADED:
-            logger.info(
-                "backend drift cleared: %.1fx of the calibration baseline", ratio
-            )
+            logger.info("backend drift cleared: %.1fx of the calibration baseline", ratio)
 
     def stats(self) -> dict:
         return {

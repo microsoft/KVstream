@@ -27,9 +27,7 @@ from kvstream.backend.health import (
 class FakeClient:
     """A backend whose liveness and generation health can differ."""
 
-    def __init__(
-        self, alive: bool = True, generates: bool = True, hang: float = 0.0
-    ) -> None:
+    def __init__(self, alive: bool = True, generates: bool = True, hang: float = 0.0) -> None:
         self.model = "m"
         self.alive = alive
         self.generates = generates

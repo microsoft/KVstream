@@ -110,9 +110,7 @@ STATUS_PAYLOAD = {
 
 
 def test_status_renders_the_table(monkeypatch):
-    monkeypatch.setattr(
-        httpx, "get", lambda url, timeout=None: _FakeResponse(STATUS_PAYLOAD)
-    )
+    monkeypatch.setattr(httpx, "get", lambda url, timeout=None: _FakeResponse(STATUS_PAYLOAD))
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
     for expected in ("tokens", "8000", "calibration:exact", "http://localhost:5273"):

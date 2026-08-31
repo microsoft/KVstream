@@ -43,7 +43,7 @@ class StubBackend:
         self.calls += 1
         self.stream_calls += 1
         self.payloads.append(payload)
-        for piece in ([self.reply] if self.reply is not None else PIECES):
+        for piece in [self.reply] if self.reply is not None else PIECES:
             if self.stream_delay:
                 await asyncio.sleep(self.stream_delay)
             yield Token(text=piece)
@@ -84,15 +84,11 @@ class StubBackend:
             "usage": {"prompt_tokens": 7 * len(texts), "total_tokens": 7 * len(texts)},
         }
 
-    async def transcribe(
-        self, files, data, timeout=None, headers=None
-    ) -> tuple[int, bytes, str]:
+    async def transcribe(self, files, data, timeout=None, headers=None) -> tuple[int, bytes, str]:
         self.calls += 1
         self.transcribe_calls.append((files, data))
         self.concurrent_transcriptions += 1
-        self.peak_transcriptions = max(
-            self.peak_transcriptions, self.concurrent_transcriptions
-        )
+        self.peak_transcriptions = max(self.peak_transcriptions, self.concurrent_transcriptions)
         try:
             if self.transcribe_delay:
                 await asyncio.sleep(self.transcribe_delay)

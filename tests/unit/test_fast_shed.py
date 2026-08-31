@@ -33,9 +33,7 @@ def _mgr(budget=4, timeout=5.0, depth=100, samples=2, hopeless=True) -> Capacity
     )
 
 
-async def _teach_rate(
-    cm: CapacityManager, seconds_per_release: float, n: int = 4
-) -> None:
+async def _teach_rate(cm: CapacityManager, seconds_per_release: float, n: int = 4) -> None:
     """Run n requests through so the manager learns how fast the backend drains."""
     for i in range(n):
         await cm.admit(f"warm-{i}", 1)

@@ -64,9 +64,7 @@ class CalibrationKey:
     backend_version: str = UNKNOWN
 
     def as_str(self) -> str:
-        return "|".join(
-            (self.model, self.device, self.cli_generation, self.backend_version)
-        )
+        return "|".join((self.model, self.device, self.cli_generation, self.backend_version))
 
     def as_dict(self) -> dict:
         return {
@@ -106,9 +104,7 @@ class SweepPoint:
         return self.p99_per_token or self.p99_seconds
 
 
-def find_knee(
-    points: list[SweepPoint], latency_ratio: float = 2.0
-) -> SweepPoint | None:
+def find_knee(points: list[SweepPoint], latency_ratio: float = 2.0) -> SweepPoint | None:
     """
     Return the last healthy sweep point before the knee, or ``None`` if the very
     first point already fails.
@@ -259,9 +255,7 @@ def lookup_budget(store_path: str, key: CalibrationKey) -> CalibrationLookup:
                 ),
             )
 
-    models = sorted(
-        {str(r.get("model")) for r in entries.values() if isinstance(r, dict)}
-    )
+    models = sorted({str(r.get("model")) for r in entries.values() if isinstance(r, dict)})
     return CalibrationLookup(
         0,
         "none",

@@ -128,10 +128,7 @@ class CircuitBreaker:
         self.last_error = error[:200]
         if not self.enabled:
             return
-        if (
-            self.state == HALF_OPEN
-            or self.consecutive_failures >= self.failure_threshold
-        ):
+        if self.state == HALF_OPEN or self.consecutive_failures >= self.failure_threshold:
             if self.state != OPEN:
                 self.trips += 1
                 logger.warning(
@@ -160,9 +157,7 @@ class CircuitBreaker:
             "trips": self.trips,
             "fast_failures": self.fast_failures,
             "last_error": self.last_error,
-            "retry_after_seconds": (
-                self.retry_after_seconds if self.state == OPEN else 0
-            ),
+            "retry_after_seconds": (self.retry_after_seconds if self.state == OPEN else 0),
         }
 
 
@@ -218,11 +213,7 @@ class BackendHealth:
             )
             return self.readiness
 
-        if (
-            not force
-            and self.readiness.checked_at
-            and self.readiness.age_seconds < self._interval
-        ):
+        if not force and self.readiness.checked_at and self.readiness.age_seconds < self._interval:
             return self.readiness
 
         if self._lock.locked():
@@ -251,8 +242,7 @@ class BackendHealth:
                     checked_at=time.monotonic(),
                     latency_seconds=time.monotonic() - started,
                     detail=(
-                        f"backend did not complete a 1-token generation within "
-                        f"{self._timeout:.0f}s"
+                        f"backend did not complete a 1-token generation within {self._timeout:.0f}s"
                     ),
                 )
                 logger.warning("readiness probe failed: %s", self.readiness.detail)

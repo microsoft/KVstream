@@ -77,9 +77,7 @@ TOOL_STREAM_CHUNKS = [
         "id": "c1",
         "object": "chat.completion.chunk",
         "model": "backend-model-name",
-        "choices": [
-            {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
-        ],
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
     },
     {
         "id": "c1",
@@ -110,9 +108,7 @@ TOOL_STREAM_CHUNKS = [
             {
                 "index": 0,
                 "delta": {
-                    "tool_calls": [
-                        {"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}
-                    ]
+                    "tool_calls": [{"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}]
                 },
                 "finish_reason": None,
             }
@@ -218,9 +214,7 @@ def _build(**overrides):
     settings.backend.model = "stub-model"
     for dotted, value in overrides.items():
         section, _, field = dotted.partition(".")
-        setattr(
-            getattr(settings, section) if field else settings, field or section, value
-        )
+        setattr(getattr(settings, section) if field else settings, field or section, value)
     app = build_app(settings)
     backend = EchoBackend()
     app.state.gateway.backend = backend
@@ -230,9 +224,7 @@ def _build(**overrides):
 @pytest_asyncio.fixture
 async def client():
     app, gw, backend = _build()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, gw, backend
 
 
@@ -369,13 +361,10 @@ async def test_streamed_tool_call_deltas_survive(client):
 
     chunks = _sse_payloads(text)
     assert chunks[0]["choices"][0]["delta"] == {"role": "assistant"}
-    assert (
-        chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"]
-        == "get_weather"
+    assert chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "get_weather"
+    assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == (
+        '{"city":"Lisbon"}'
     )
-    assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"][
-        "arguments"
-    ] == ('{"city":"Lisbon"}')
     assert chunks[3]["choices"][0]["finish_reason"] == "tool_calls"
     assert text.rstrip().endswith("data: [DONE]")
 
@@ -471,9 +460,7 @@ async def test_a_cached_tool_call_is_replayed_intact():
         "tools": [TOOL],
         "temperature": 0.0,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         first = await c.post("/v1/chat/completions", json=payload)
         second = await c.post("/v1/chat/completions", json=payload)
 
@@ -497,9 +484,7 @@ async def test_a_cached_stream_replays_the_recorded_chunks():
         "temperature": 0.0,
         "stream": True,
     }
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         async with c.stream("POST", "/v1/chat/completions", json=payload) as r1:
             live = "".join([chunk async for chunk in r1.aiter_text()])
         async with c.stream("POST", "/v1/chat/completions", json=payload) as r2:
@@ -521,9 +506,7 @@ async def test_streamed_and_non_streamed_entries_do_not_collide():
     app.state.gateway.backend = backend
 
     base = {"model": "stub-model", "messages": AGENT_MESSAGES, "temperature": 0.0}
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         plain = await c.post("/v1/chat/completions", json=base)
         async with c.stream(
             "POST", "/v1/chat/completions", json={**base, "stream": True}
@@ -553,9 +536,7 @@ async def test_authorization_header_is_forwarded(client):
 @pytest.mark.asyncio
 async def test_authorization_forwarding_can_be_disabled():
     app, _, backend = _build(**{"backend.forward_authorization": False})
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post(
             "/v1/chat/completions",
             json={
@@ -587,9 +568,7 @@ async def test_legacy_completions_are_proxied_and_admitted(client):
 @pytest.mark.asyncio
 async def test_completions_can_be_turned_off():
     app, _, _ = _build(**{"routes.completions": False})
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/v1/completions", json={"model": "m", "prompt": "x"})
     assert r.status_code == 404
 
@@ -632,9 +611,7 @@ async def test_admission_costs_n_choices_and_the_default_budget():
 
     msgs = [{"role": "user", "content": "hi"}]
     _, one = gw._cost(ChatCompletionRequest(model="m", messages=msgs, max_tokens=100))
-    _, four = gw._cost(
-        ChatCompletionRequest(model="m", messages=msgs, max_tokens=100, n=4)
-    )
+    _, four = gw._cost(ChatCompletionRequest(model="m", messages=msgs, max_tokens=100, n=4))
     _, default = gw._cost(ChatCompletionRequest(model="m", messages=msgs))
 
     assert four - one == 300  # three extra completions of 100

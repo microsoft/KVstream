@@ -33,9 +33,7 @@ class FakeBackend:
     latency jumps — which is exactly the knee calibration is looking for.
     """
 
-    def __init__(
-        self, ceiling: int = 12, base: float = 0.01, cold: float = 5.0
-    ) -> None:
+    def __init__(self, ceiling: int = 12, base: float = 0.01, cold: float = 5.0) -> None:
         self.model = "stub-model"
         self.base_url = "http://stub"
         self.ceiling = ceiling
@@ -121,16 +119,12 @@ def test_find_knee_still_behaves():
 async def test_the_sweep_warms_up_before_measuring(tmp_path, monkeypatch):
     """A cold first request must not become the baseline everything is judged against."""
     backend = FakeBackend(ceiling=8, cold=10.0)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=1, refine=False)
 
-    record = lookup_budget(
-        str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    record = lookup_budget(str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     sweep = record.record["sweep"]
     # The very slow cold request was burned before the first measured point.
     assert sweep[0]["p99_seconds"] < 1.0
@@ -162,9 +156,7 @@ async def test_bisection_narrows_the_knee(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=2, trials=4, warmup=0, refine=False)
@@ -175,9 +167,7 @@ async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_the_sweep_uses_mixed_request_shapes(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=0, refine=False)
@@ -218,9 +208,7 @@ async def test_a_backend_that_fails_everything_yields_a_single_request_budget(tm
     assert budget <= 256 + 64
 
 
-def _stub_latency(
-    monkeypatch, service: CalibrationService, backend: FakeBackend
-) -> None:
+def _stub_latency(monkeypatch, service: CalibrationService, backend: FakeBackend) -> None:
     """Make `_probe_once` report the backend's synthetic latency directly."""
 
     async def probe(prompt_tokens: int, max_tokens: int) -> float | None:

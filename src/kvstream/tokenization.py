@@ -165,16 +165,12 @@ class TokenEstimator:
         if chars > 0:
             obs_cpt = chars / actual_prompt_tokens
             if MIN_CHARS_PER_TOKEN <= obs_cpt <= MAX_CHARS_PER_TOKEN:
-                self._cpt = _clamp_chars(
-                    (1 - self._alpha) * self._cpt + self._alpha * obs_cpt
-                )
+                self._cpt = _clamp_chars((1 - self._alpha) * self._cpt + self._alpha * obs_cpt)
                 updated = True
         if units > 0:
             obs_upt = units / actual_prompt_tokens
             if MIN_UNITS_PER_TOKEN <= obs_upt <= MAX_UNITS_PER_TOKEN:
-                self._upt = _clamp_units(
-                    (1 - self._alpha) * self._upt + self._alpha * obs_upt
-                )
+                self._upt = _clamp_units((1 - self._alpha) * self._upt + self._alpha * obs_upt)
                 updated = True
         if updated:
             self._samples += 1

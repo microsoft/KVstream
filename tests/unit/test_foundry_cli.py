@@ -147,9 +147,7 @@ async def test_query_endpoint_reads_the_sdk_dialect(monkeypatch):
         return 1, ""
 
     monkeypatch.setattr(foundry_cli, "_run", fake_run)
-    found = await query_endpoint(
-        FoundryCli(path="foundry", version="0.10.0", generation=GEN_SDK)
-    )
+    found = await query_endpoint(FoundryCli(path="foundry", version="0.10.0", generation=GEN_SDK))
     assert found is not None
     assert found.url == "http://127.0.0.1:52149"
     assert found.command == "foundry status --output json"

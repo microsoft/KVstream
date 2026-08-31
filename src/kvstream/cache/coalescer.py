@@ -35,9 +35,7 @@ class Coalescer:
     def inflight(self) -> int:
         return len(self._inflight)
 
-    async def run(
-        self, key: str, factory: Callable[[], Awaitable[T]]
-    ) -> tuple[T, bool]:
+    async def run(self, key: str, factory: Callable[[], Awaitable[T]]) -> tuple[T, bool]:
         """
         Execute ``factory`` once per ``key`` while duplicates are in flight.
 

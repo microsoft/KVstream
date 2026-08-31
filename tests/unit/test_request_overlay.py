@@ -50,9 +50,7 @@ def test_multimodal_content_parts():
 
 
 def test_unknown_message_fields_survive():
-    m = ChatMessage(
-        role="user", content="hi", **{"refusal": None, "audio": {"id": "x"}}
-    )
+    m = ChatMessage(role="user", content="hi", **{"refusal": None, "audio": {"id": "x"}})
     dumped = m.model_dump()
     assert dumped["audio"] == {"id": "x"}
 
@@ -110,12 +108,8 @@ def test_backend_payload_drops_stream_options_when_not_streaming():
 
 def test_backend_payload_drops_an_empty_stop():
     """Foundry Local answers HTTP 400 for one."""
-    assert "stop" not in backend_payload(
-        {"model": "m", "messages": [], "stop": []}, stream=False
-    )
-    assert backend_payload({"model": "m", "messages": [], "stop": "END"}, stream=False)[
-        "stop"
-    ]
+    assert "stop" not in backend_payload({"model": "m", "messages": [], "stop": []}, stream=False)
+    assert backend_payload({"model": "m", "messages": [], "stop": "END"}, stream=False)["stop"]
 
 
 def test_backend_payload_does_not_mutate_the_client_object():
@@ -155,10 +149,7 @@ def test_n_greater_than_one_is_allowed():
 
 def test_no_arbitrary_upper_bound_on_max_tokens():
     """A long-context model must not be rejected by the gateway's own ceiling."""
-    assert (
-        ChatCompletionRequest(model="m", messages=[], max_tokens=200_000).max_tokens
-        == 200_000
-    )
+    assert ChatCompletionRequest(model="m", messages=[], max_tokens=200_000).max_tokens == 200_000
 
 
 @pytest.mark.parametrize("bad", [0, -1])
@@ -176,10 +167,7 @@ def test_absent_temperature_is_not_deterministic():
 
 
 def test_explicit_zero_is_deterministic():
-    assert (
-        ChatCompletionRequest(model="m", messages=[], temperature=0.0).deterministic
-        is True
-    )
+    assert ChatCompletionRequest(model="m", messages=[], temperature=0.0).deterministic is True
 
 
 def test_multi_choice_is_never_deterministic():

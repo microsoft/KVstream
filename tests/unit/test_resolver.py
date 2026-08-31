@@ -95,9 +95,7 @@ async def test_cli_endpoint_is_used_when_it_answers(monkeypatch):
     _patch(
         monkeypatch,
         cli=FoundryCli(path="foundry", version="0.10.0", generation=GEN_SDK),
-        endpoint=CliEndpoint(
-            url="http://127.0.0.1:52149", command="foundry status --output json"
-        ),
+        endpoint=CliEndpoint(url="http://127.0.0.1:52149", command="foundry status --output json"),
         alive=("http://127.0.0.1:52149",),
         scan=None,
     )
@@ -229,15 +227,9 @@ def test_pin_url_can_be_overridden_both_ways():
 def test_foundry_cli_mode(monkeypatch):
     monkeypatch.setattr(resolver.foundry_cli, "in_container", lambda: False)
     assert Settings().foundry_cli_enabled() is True
-    assert (
-        Settings(**{"backend": {"use_foundry_cli": "never"}}).foundry_cli_enabled()
-        is False
-    )
+    assert Settings(**{"backend": {"use_foundry_cli": "never"}}).foundry_cli_enabled() is False
 
     monkeypatch.setattr(resolver.foundry_cli, "in_container", lambda: True)
     assert Settings().foundry_cli_enabled() is False
     # "always" is how you opt back in when you know the binary is there.
-    assert (
-        Settings(**{"backend": {"use_foundry_cli": "always"}}).foundry_cli_enabled()
-        is True
-    )
+    assert Settings(**{"backend": {"use_foundry_cli": "always"}}).foundry_cli_enabled() is True

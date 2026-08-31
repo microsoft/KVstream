@@ -97,9 +97,7 @@ def test_the_anchor_always_weighs_one():
 def test_an_unknown_model_is_costed_exactly_as_before():
     """No geometry means no opinion — never a penalty or a discount."""
     r = GeometryRegistry("phi-3-mini")
-    r.declare(
-        "phi-3-mini", ModelGeometry(**{"layers": 32, "kv_heads": 32, "head_dim": 96})
-    )
+    r.declare("phi-3-mini", ModelGeometry(**{"layers": 32, "kv_heads": 32, "head_dim": 96}))
     assert r.weight_for("some-other-model") == 1.0
 
 

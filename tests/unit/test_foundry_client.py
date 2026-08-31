@@ -42,9 +42,7 @@ async def test_streaming_requests_usage_by_default():
         import json
 
         seen.append(json.loads(request.content))
-        return httpx.Response(
-            200, text=SSE_BODY, headers={"content-type": "text/event-stream"}
-        )
+        return httpx.Response(200, text=SSE_BODY, headers={"content-type": "text/event-stream"})
 
     c = _client(handler)
     tokens = [t async for t in c.chat({"model": "m", "messages": []})]
@@ -71,9 +69,7 @@ async def test_stream_options_rejection_falls_back_once():
         attempts.append(body)
         if "stream_options" in body:
             return httpx.Response(400, text='{"error":"unknown field stream_options"}')
-        return httpx.Response(
-            200, text=SSE_BODY, headers={"content-type": "text/event-stream"}
-        )
+        return httpx.Response(200, text=SSE_BODY, headers={"content-type": "text/event-stream"})
 
     c = _client(handler)
     tokens = [t async for t in c.chat({"model": "m", "messages": []})]

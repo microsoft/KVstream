@@ -53,9 +53,7 @@ def _fake_network(monkeypatch, ports: dict[int, dict]):
         if request.url.path == "/v1/models":
             headers = {KVSTREAM_HEADER: "1.0.0"} if spec.get("kvstream") else {}
             data = [{"id": m} for m in spec.get("models", [])]
-            return httpx.Response(
-                200, json={"object": "list", "data": data}, headers=headers
-            )
+            return httpx.Response(200, json={"object": "list", "data": data}, headers=headers)
         return httpx.Response(404)
 
     monkeypatch.setattr(discovery, "list_listening_ports", lambda: sorted(ports.keys()))
@@ -71,9 +69,7 @@ async def test_prefers_the_port_serving_the_configured_model(monkeypatch):
             5273: {"models": ["phi-3-mini"]},
         },
     )
-    found = await discover(
-        client, "http://localhost:9999", set(), prefer_model="phi-3-mini"
-    )
+    found = await discover(client, "http://localhost:9999", set(), prefer_model="phi-3-mini")
     assert found == "http://localhost:5273"
     await client.aclose()
 
@@ -88,9 +84,7 @@ async def test_never_adopts_another_kvstream_as_a_backend(monkeypatch):
             5273: {"models": ["phi-3-mini"]},
         },
     )
-    found = await discover(
-        client, "http://localhost:9999", set(), prefer_model="phi-3-mini"
-    )
+    found = await discover(client, "http://localhost:9999", set(), prefer_model="phi-3-mini")
     assert found == "http://localhost:5273"
     await client.aclose()
 
@@ -98,9 +92,7 @@ async def test_never_adopts_another_kvstream_as_a_backend(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_lone_kvstream_is_not_a_backend_at_all(monkeypatch):
     """Better to fail than to build a proxy loop."""
-    client = _fake_network(
-        monkeypatch, {8080: {"models": ["phi-3-mini"], "kvstream": True}}
-    )
+    client = _fake_network(monkeypatch, {8080: {"models": ["phi-3-mini"], "kvstream": True}})
     assert await discover(client, "http://localhost:9999", set()) is None
     await client.aclose()
 
@@ -121,9 +113,7 @@ async def test_ollama_is_demoted_but_not_excluded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_port_with_models_beats_an_empty_one(monkeypatch):
-    client = _fake_network(
-        monkeypatch, {5000: {"models": []}, 5273: {"models": ["phi-3-mini"]}}
-    )
+    client = _fake_network(monkeypatch, {5000: {"models": []}, 5273: {"models": ["phi-3-mini"]}})
     found = await discover(client, "http://localhost:9999", set())
     assert found == "http://localhost:5273"
     await client.aclose()

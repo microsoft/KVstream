@@ -39,9 +39,7 @@ async def geometry_app():
         admission={"mode": "tokens", "budget_tokens": 1_000_000},
         models={"small-model": SMALL, "large-model": LARGE},
     )
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, gw, stub
 
 
@@ -51,12 +49,8 @@ async def geometry_app():
 @pytest.mark.asyncio
 async def test_a_heavier_model_costs_more_for_the_same_tokens(geometry_app):
     _, gw, _ = geometry_app
-    small = ChatCompletionRequest(
-        model="small-model", messages=MESSAGES, max_tokens=100
-    )
-    large = ChatCompletionRequest(
-        model="large-model", messages=MESSAGES, max_tokens=100
-    )
+    small = ChatCompletionRequest(model="small-model", messages=MESSAGES, max_tokens=100)
+    large = ChatCompletionRequest(model="large-model", messages=MESSAGES, max_tokens=100)
 
     _, small_cost = gw._cost(small)
     _, large_cost = gw._cost(large)
@@ -67,12 +61,8 @@ async def test_a_heavier_model_costs_more_for_the_same_tokens(geometry_app):
 async def test_an_undeclared_model_is_costed_as_before(geometry_app):
     """No geometry means no opinion, not a guess."""
     _, gw, _ = geometry_app
-    known = ChatCompletionRequest(
-        model="small-model", messages=MESSAGES, max_tokens=100
-    )
-    unknown = ChatCompletionRequest(
-        model="mystery-model", messages=MESSAGES, max_tokens=100
-    )
+    known = ChatCompletionRequest(model="small-model", messages=MESSAGES, max_tokens=100)
+    unknown = ChatCompletionRequest(model="mystery-model", messages=MESSAGES, max_tokens=100)
     assert gw._cost(unknown)[1] == gw._cost(known)[1]
 
 
@@ -179,13 +169,9 @@ async def test_drain_gives_up_after_the_timeout():
 @pytest.mark.asyncio
 async def test_a_draining_gateway_rejects_new_work():
     app, gw, _ = _app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await gw.capacity.start_draining()
-        r = await c.post(
-            "/v1/chat/completions", json={"model": "stub-model", "messages": MESSAGES}
-        )
+        r = await c.post("/v1/chat/completions", json={"model": "stub-model", "messages": MESSAGES})
     assert r.status_code == 503
     assert r.headers["retry-after"] == "1"
     assert "shutting down" in r.json()["error"]["message"]
