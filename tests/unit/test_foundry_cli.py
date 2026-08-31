@@ -223,6 +223,7 @@ async def test_list_models_is_not_attempted_on_the_service_cli():
     """`foundry model list --output json` is a 0.10.x surface."""
     assert await list_models(FoundryCli(path="foundry", generation=GEN_SERVICE)) is None
 
+
 # -- what the real CLI actually prints ---------------------------------
 
 

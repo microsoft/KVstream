@@ -20,9 +20,7 @@ async def test_identical_concurrent_calls_run_once():
         await asyncio.sleep(0.05)
         return "RESULT"
 
-    results = await asyncio.gather(
-        c.run("k", factory), c.run("k", factory), c.run("k", factory)
-    )
+    results = await asyncio.gather(c.run("k", factory), c.run("k", factory), c.run("k", factory))
     values = [r[0] for r in results]
     followers = [r[1] for r in results]
 

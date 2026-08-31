@@ -39,7 +39,8 @@ class Metrics:
             registry=self.registry,
         )
         self.coalesced = Counter(
-            "kvstream_coalesced_total", "Requests served by a coalesced leader.",
+            "kvstream_coalesced_total",
+            "Requests served by a coalesced leader.",
             registry=self.registry,
         )
         self.latency = Histogram(
@@ -122,8 +123,7 @@ class Metrics:
         )
         self.drift_ratio = Gauge(
             "kvstream_backend_drift_ratio",
-            "Served seconds-per-token relative to the calibration baseline; "
-            "0 when unknown.",
+            "Served seconds-per-token relative to the calibration baseline; 0 when unknown.",
             registry=self.registry,
         )
         self.backend_up = Gauge(

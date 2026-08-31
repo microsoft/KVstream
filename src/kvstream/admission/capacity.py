@@ -451,7 +451,7 @@ class CapacityManager:
                     # margin, never on a marginal call.
                     if self._may_reject() and predicted > left * self._hopeless_margin > 0:
                         self._discard(waiter)
-                        self._q.timed_out -= 1        # counted below as hopeless
+                        self._q.timed_out -= 1  # counted below as hopeless
                         self._hopeless_rejections += 1
                         self._q.rejected += 1
                         self._drain()

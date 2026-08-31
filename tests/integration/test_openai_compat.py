@@ -69,21 +69,60 @@ TOOL_RESPONSE_BODY = {
 # Raw SSE chunks as a real server sends them: a role-only opener, tool-call
 # argument deltas, a finish chunk, then usage.
 TOOL_STREAM_CHUNKS = [
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"tool_calls": [
-         {"index": 0, "id": "call_abc", "type": "function",
-          "function": {"name": "get_weather", "arguments": ""}}]}, "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"tool_calls": [
-         {"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}]},
-         "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [], "usage": {"prompt_tokens": 31, "completion_tokens": 12,
-                              "total_tokens": 43}},
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_abc",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": ""},
+                        }
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}]
+                },
+                "finish_reason": None,
+            }
+        ],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [],
+        "usage": {"prompt_tokens": 31, "completion_tokens": 12, "total_tokens": 43},
+    },
 ]
 
 
@@ -196,8 +235,12 @@ async def test_a_tool_calling_turn_is_accepted_and_forwarded(client):
     c, _, backend = client
     r = await c.post(
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-              "tool_choice": "auto"},
+        json={
+            "model": "stub-model",
+            "messages": AGENT_MESSAGES,
+            "tools": [TOOL],
+            "tool_choice": "auto",
+        },
     )
     assert r.status_code == 200
 
@@ -290,8 +333,7 @@ async def test_streamed_tool_call_deltas_survive(client):
     async with c.stream(
         "POST",
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-              "stream": True},
+        json={"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL], "stream": True},
     ) as resp:
         assert resp.status_code == 200
         text = "".join([chunk async for chunk in resp.aiter_text()])
@@ -329,8 +371,12 @@ async def test_usage_chunk_is_delivered_when_the_client_asks(client):
     async with c.stream(
         "POST",
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "stream": True,
-              "stream_options": {"include_usage": True}},
+        json={
+            "model": "stub-model",
+            "messages": AGENT_MESSAGES,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        },
     ) as resp:
         text = "".join([chunk async for chunk in resp.aiter_text()])
 
@@ -345,9 +391,11 @@ async def test_estimated_usage_is_disclosed_in_a_header(client):
     """When the backend reports nothing, say the counts are ours."""
     c, _, backend = client
     backend.body = {
-        "id": "x", "object": "chat.completion",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"},
-                     "finish_reason": "stop"}],
+        "id": "x",
+        "object": "chat.completion",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}
+        ],
     }
     r = await c.post(
         "/v1/chat/completions",
@@ -381,13 +429,17 @@ async def test_a_cached_tool_call_is_replayed_intact():
     backend = EchoBackend()
     app.state.gateway.backend = backend
 
-    payload = {"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-               "temperature": 0.0}
+    payload = {
+        "model": "stub-model",
+        "messages": AGENT_MESSAGES,
+        "tools": [TOOL],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         first = await c.post("/v1/chat/completions", json=payload)
         second = await c.post("/v1/chat/completions", json=payload)
 
-    assert len(backend.payloads) == 1          # second served from cache
+    assert len(backend.payloads) == 1  # second served from cache
     assert first.json() == second.json()
     assert second.json()["choices"][0]["message"]["tool_calls"] == [TOOL_CALL]
 
@@ -401,8 +453,12 @@ async def test_a_cached_stream_replays_the_recorded_chunks():
     backend = EchoBackend()
     app.state.gateway.backend = backend
 
-    payload = {"model": "stub-model", "messages": AGENT_MESSAGES, "temperature": 0.0,
-               "stream": True}
+    payload = {
+        "model": "stub-model",
+        "messages": AGENT_MESSAGES,
+        "temperature": 0.0,
+        "stream": True,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         async with c.stream("POST", "/v1/chat/completions", json=payload) as r1:
             live = "".join([chunk async for chunk in r1.aiter_text()])
@@ -434,7 +490,7 @@ async def test_streamed_and_non_streamed_entries_do_not_collide():
 
     assert plain.json()["object"] == "chat.completion"
     assert _sse_payloads(body)[0]["object"] == "chat.completion.chunk"
-    assert len(backend.payloads) == 2   # each shape fetched once
+    assert len(backend.payloads) == 2  # each shape fetched once
 
 
 # -- auth passthrough ---------------------------------------------------
@@ -530,8 +586,8 @@ async def test_admission_costs_n_choices_and_the_default_budget():
     _, four = gw._cost(ChatCompletionRequest(model="m", messages=msgs, max_tokens=100, n=4))
     _, default = gw._cost(ChatCompletionRequest(model="m", messages=msgs))
 
-    assert four - one == 300           # three extra completions of 100
-    assert default - one == 400        # 500 assumed instead of 100
+    assert four - one == 300  # three extra completions of 100
+    assert default - one == 400  # 500 assumed instead of 100
 
 
 @pytest.mark.asyncio

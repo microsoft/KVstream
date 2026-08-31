@@ -54,7 +54,7 @@ async def test_a_heavier_model_costs_more_for_the_same_tokens(geometry_app):
 
     _, small_cost = gw._cost(small)
     _, large_cost = gw._cost(large)
-    assert large_cost == small_cost * 16      # 4x layers x 4x kv heads
+    assert large_cost == small_cost * 16  # 4x layers x 4x kv heads
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_a_heavy_model_actually_consumes_more_budget(geometry_app):
         json={"model": "large-model", "messages": MESSAGES, "max_tokens": 100},
     )
     assert r.status_code == 200
-    assert gw.capacity.reclaimed > 0      # reclaimed in the weighted unit
+    assert gw.capacity.reclaimed > 0  # reclaimed in the weighted unit
     assert gw.capacity.in_flight == 0
 
 
@@ -145,9 +145,9 @@ async def test_drain_turns_away_the_queue_and_waits_for_the_rest():
     await asyncio.sleep(0.05)
 
     assert gw.capacity.draining is True
-    assert gw.capacity.waiting == 0          # the queued one was turned away
-    assert gw.capacity.in_flight == 1        # the running one was left alone
-    assert not drain.done()                  # ...and drain is waiting for it
+    assert gw.capacity.waiting == 0  # the queued one was turned away
+    assert gw.capacity.in_flight == 1  # the running one was left alone
+    assert not drain.done()  # ...and drain is waiting for it
 
     await gw.capacity.release("occupier")
     await asyncio.wait_for(drain, timeout=2.0)
@@ -163,7 +163,7 @@ async def test_drain_gives_up_after_the_timeout():
     await gw.capacity.admit("stuck", 1)
 
     await asyncio.wait_for(gw.drain(timeout=0.1), timeout=2.0)
-    assert gw.capacity.in_flight == 1        # still there; we exited anyway
+    assert gw.capacity.in_flight == 1  # still there; we exited anyway
 
 
 @pytest.mark.asyncio
@@ -171,9 +171,7 @@ async def test_a_draining_gateway_rejects_new_work():
     app, gw, _ = _app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await gw.capacity.start_draining()
-        r = await c.post(
-            "/v1/chat/completions", json={"model": "stub-model", "messages": MESSAGES}
-        )
+        r = await c.post("/v1/chat/completions", json={"model": "stub-model", "messages": MESSAGES})
     assert r.status_code == 503
     assert r.headers["retry-after"] == "1"
     assert "shutting down" in r.json()["error"]["message"]

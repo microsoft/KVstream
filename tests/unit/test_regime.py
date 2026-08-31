@@ -38,9 +38,14 @@ def _point(concurrency: int, rps: float, errors: int = 0) -> SweepPoint:
 
 def test_a_serialising_runtime_is_recognised():
     """The measured case: throughput flat at ~2.6 r/s from concurrency 1 to 8."""
-    profile = classify_runtime([
-        _point(1, 2.61), _point(2, 2.60), _point(4, 2.58), _point(8, 2.57),
-    ])
+    profile = classify_runtime(
+        [
+            _point(1, 2.61),
+            _point(2, 2.60),
+            _point(4, 2.58),
+            _point(8, 2.57),
+        ]
+    )
     assert profile.regime == SERIALISING
     assert profile.optimal_concurrency == 1
     assert profile.admission_raises_throughput is False
@@ -49,9 +54,14 @@ def test_a_serialising_runtime_is_recognised():
 
 def test_a_batching_runtime_is_recognised():
     """Throughput climbs with concurrency, then flattens — the assumed case."""
-    profile = classify_runtime([
-        _point(1, 2.0), _point(2, 3.6), _point(4, 6.1), _point(8, 6.4),
-    ])
+    profile = classify_runtime(
+        [
+            _point(1, 2.0),
+            _point(2, 3.6),
+            _point(4, 6.1),
+            _point(8, 6.4),
+        ]
+    )
     assert profile.regime == BATCHING
     assert profile.optimal_concurrency == 8
     assert profile.admission_raises_throughput is True
@@ -59,9 +69,14 @@ def test_a_batching_runtime_is_recognised():
 
 
 def test_a_capped_runtime_is_recognised():
-    profile = classify_runtime([
-        _point(1, 2.0), _point(2, 2.1), _point(4, 2.0), _point(8, 0.0, errors=8),
-    ])
+    profile = classify_runtime(
+        [
+            _point(1, 2.0),
+            _point(2, 2.1),
+            _point(4, 2.0),
+            _point(8, 0.0, errors=8),
+        ]
+    )
     assert profile.regime == CAPPED
     assert profile.refuses_beyond == 8
     assert profile.admission_raises_throughput is True
@@ -70,12 +85,17 @@ def test_a_capped_runtime_is_recognised():
 
 def test_a_cap_wins_the_label_over_how_it_scales_below():
     """The refusal threshold is the more actionable fact, so it is the headline."""
-    profile = classify_runtime([
-        _point(1, 2.0), _point(2, 3.8), _point(4, 7.0), _point(8, 0.0, errors=8),
-    ])
+    profile = classify_runtime(
+        [
+            _point(1, 2.0),
+            _point(2, 3.8),
+            _point(4, 7.0),
+            _point(8, 0.0, errors=8),
+        ]
+    )
     assert profile.regime == CAPPED
     assert profile.refuses_beyond == 8
-    assert profile.optimal_concurrency == 4      # the batching peak is still reported
+    assert profile.optimal_concurrency == 4  # the batching peak is still reported
     assert profile.throughput_gain > 3.0
 
 
@@ -121,6 +141,11 @@ def test_the_profile_serialises_for_status_and_storage():
     assert payload["regime"] == BATCHING
     assert payload["admission_raises_throughput"] is True
     assert set(payload) == {
-        "regime", "optimal_concurrency", "peak_tokens_per_second", "throughput_gain",
-        "refuses_beyond", "admission_raises_throughput", "detail",
+        "regime",
+        "optimal_concurrency",
+        "peak_tokens_per_second",
+        "throughput_gain",
+        "refuses_beyond",
+        "admission_raises_throughput",
+        "detail",
     }
