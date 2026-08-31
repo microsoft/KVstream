@@ -29,13 +29,13 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check kvstream tests
+        run: ruff check src/kvstream tests
 
       - name: Format check (ruff)
-        run: ruff format --check kvstream tests
+        run: ruff format --check src/kvstream tests
 
       - name: Type check (mypy)
-        run: mypy kvstream
+        run: mypy src/kvstream
 
       - name: Run tests
         run: pytest --cov=kvstream --cov-report=term-missing

@@ -56,7 +56,9 @@ def list_listening_ports() -> list[int]:
         if sys.platform == "win32":
             result = subprocess.run(
                 ["netstat", "-ano", "-p", "TCP"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             pattern = re.compile(
                 r"TCP\s+(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|::1):(\d+)\s+\S+\s+LISTENING",
@@ -64,7 +66,10 @@ def list_listening_ports() -> list[int]:
             )
         else:
             result = subprocess.run(
-                ["ss", "-tlnH"], capture_output=True, text=True, timeout=5,
+                ["ss", "-tlnH"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             pattern = re.compile(r":(\d+)\s")
         for line in result.stdout.splitlines():
@@ -174,14 +179,17 @@ async def discover(
     best = sorted(candidates, key=Candidate.rank)[0]
     logger.info(
         "Discovered Foundry Local at %s (%d model(s) loaded, %s%s)",
-        best.url, best.model_count, best.kind,
+        best.url,
+        best.model_count,
+        best.kind,
         ", serving the configured model" if best.has_configured_model else "",
     )
     if not best.has_configured_model and prefer_model:
         logger.warning(
             "%s does not list the configured model %r — set an explicit backend URL "
             "if this is the wrong server.",
-            best.url, prefer_model,
+            best.url,
+            prefer_model,
         )
     return best.url
 

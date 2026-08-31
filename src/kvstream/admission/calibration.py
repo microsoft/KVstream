@@ -290,8 +290,12 @@ def _probe_shapes(prompt_tokens: int, max_tokens: int) -> list[tuple[int, int]]:
 def _log_point(point: SweepPoint, prefix: str = "sweep") -> None:
     logger.info(
         "%s c=%d inflight=%d p99=%.2fs per-token=%.5fs errors=%d",
-        prefix, point.concurrency, point.inflight_tokens, point.p99_seconds,
-        point.p99_per_token, point.errors,
+        prefix,
+        point.concurrency,
+        point.inflight_tokens,
+        point.p99_seconds,
+        point.p99_per_token,
+        point.errors,
     )
 
 
@@ -440,7 +444,9 @@ class CalibrationService:
         self.profile = classify_runtime(points)
         logger.info(
             "runtime regime: %s (optimal concurrency %d) — %s",
-            self.profile.regime, self.profile.optimal_concurrency, self.profile.detail,
+            self.profile.regime,
+            self.profile.optimal_concurrency,
+            self.profile.detail,
         )
         if not self.profile.admission_raises_throughput:
             logger.warning("%s", self.profile.advice)

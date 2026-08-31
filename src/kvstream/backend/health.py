@@ -38,8 +38,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
 logger = logging.getLogger("kvstream.health")
 
-CLOSED = "closed"        # normal operation
-OPEN = "open"            # failing fast; the backend is presumed unusable
+CLOSED = "closed"  # normal operation
+OPEN = "open"  # failing fast; the backend is presumed unusable
 HALF_OPEN = "half_open"  # cooldown elapsed; one trial is allowed through
 
 
@@ -135,7 +135,9 @@ class CircuitBreaker:
                     "circuit breaker open after %d consecutive backend failures: %s. "
                     "Requests will fail fast for %.0fs rather than queue behind a "
                     "backend that is not serving.",
-                    self.consecutive_failures, self.last_error, self.reset_seconds,
+                    self.consecutive_failures,
+                    self.last_error,
+                    self.reset_seconds,
                 )
             self.state = OPEN
             self.opened_at = time.monotonic()
@@ -240,8 +242,7 @@ class BackendHealth:
                     checked_at=time.monotonic(),
                     latency_seconds=time.monotonic() - started,
                     detail=(
-                        f"backend did not complete a 1-token generation within "
-                        f"{self._timeout:.0f}s"
+                        f"backend did not complete a 1-token generation within {self._timeout:.0f}s"
                     ),
                 )
                 logger.warning("readiness probe failed: %s", self.readiness.detail)

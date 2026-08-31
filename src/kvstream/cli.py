@@ -83,7 +83,9 @@ def serve(
     from kvstream.server import serve as _serve
 
     s = _settings(
-        config, host=host, port=port,
+        config,
+        host=host,
+        port=port,
     )
     if model is not None:
         s.backend.model = model
@@ -162,7 +164,8 @@ def calibrate(
     trials: int = typer.Option(3, help="repeats per sweep point (pooled before the percentile)"),
     warmup: int = typer.Option(1, help="warm-up requests before measuring"),
     refine: bool = typer.Option(
-        True, "--refine/--no-refine",
+        True,
+        "--refine/--no-refine",
         help="bisect between the last healthy point and the first unhealthy one",
     ),
 ) -> None:
@@ -181,8 +184,10 @@ def calibrate(
 
     async def _run() -> int:
         client = FoundryClient(
-            base_url=s.backend.base_url, model=s.backend.model,
-            timeout=s.backend.timeout_seconds, discover=s.backend.discover,
+            base_url=s.backend.base_url,
+            model=s.backend.model,
+            timeout=s.backend.timeout_seconds,
+            discover=s.backend.discover,
             discovery_cooldown=s.backend.discovery_cooldown_seconds,
             request_usage=s.backend.request_usage,
         )

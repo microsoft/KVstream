@@ -64,9 +64,7 @@ class DeviceModel:
 
 def _make_manager(unit: str) -> CapacityManager:
     budget = DEVICE_CAPACITY_TOKENS if unit == "tokens" else FIXED_CAP
-    return CapacityManager(
-        budget=budget, unit=unit, admission_timeout=10.0, max_queue_depth=1000
-    )
+    return CapacityManager(budget=budget, unit=unit, admission_timeout=10.0, max_queue_depth=1000)
 
 
 def _cost(cm: CapacityManager, size_tokens: int) -> tuple[int, int]:
@@ -75,9 +73,7 @@ def _cost(cm: CapacityManager, size_tokens: int) -> tuple[int, int]:
     return cm.cost_of(rc), rc.tokens
 
 
-async def _run_workload(
-    cm: CapacityManager, sizes: list[int], hold: float = 0.03
-) -> DeviceModel:
+async def _run_workload(cm: CapacityManager, sizes: list[int], hold: float = 0.03) -> DeviceModel:
     """Drive `sizes` concurrently through `cm`, recording the simulated device load."""
     device = DeviceModel(DEVICE_CAPACITY_TOKENS)
 

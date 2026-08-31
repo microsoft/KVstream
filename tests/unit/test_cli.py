@@ -66,8 +66,12 @@ def test_health_reports_an_unreachable_backend(monkeypatch):
         httpx,
         "get",
         lambda url, timeout=None: _FakeResponse(
-            {"status": "degraded", "backend_healthy": False,
-             "backend_url": "http://localhost:5273", "model": "phi-3-mini"}
+            {
+                "status": "degraded",
+                "backend_healthy": False,
+                "backend_url": "http://localhost:5273",
+                "model": "phi-3-mini",
+            }
         ),
     )
     result = runner.invoke(app, ["health"])
@@ -168,11 +172,16 @@ def test_calibrate_stores_a_budget_under_the_full_key(monkeypatch, tmp_path, cap
         app,
         [
             "calibrate",
-            "--model", "phi-3-mini",
-            "--device", "npu",
-            "--max-concurrency", "2",
-            "--trials", "1",
-            "--warmup", "0",
+            "--model",
+            "phi-3-mini",
+            "--device",
+            "npu",
+            "--max-concurrency",
+            "2",
+            "--trials",
+            "1",
+            "--warmup",
+            "0",
             "--no-refine",
         ],
         env={"KVSTREAM_ADMISSION__CALIBRATION_STORE": str(store)},
@@ -243,7 +252,7 @@ def test_bench_counts_errors(monkeypatch):
 
 def test_output_is_widened_for_redirected_streams():
     """The Windows bug: cp1252 stdout could not encode the banner or the logs."""
-    cli_module._widen_output()   # must be safe to call repeatedly
+    cli_module._widen_output()  # must be safe to call repeatedly
     cli_module._widen_output()
 
 

@@ -43,10 +43,10 @@ from urllib.parse import urlparse
 logger = logging.getLogger("kvstream.foundry_cli")
 
 # CLI generations.
-GEN_SDK = "0.10.x"        # foundry server / foundry status
-GEN_SERVICE = "service"   # foundry service start|status
-GEN_UNKNOWN = "unknown"   # a foundry binary we could not classify
-GEN_ABSENT = "absent"     # no foundry binary on PATH
+GEN_SDK = "0.10.x"  # foundry server / foundry status
+GEN_SERVICE = "service"  # foundry service start|status
+GEN_UNKNOWN = "unknown"  # a foundry binary we could not classify
+GEN_ABSENT = "absent"  # no foundry binary on PATH
 
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _URL_RE = re.compile(r"https?://[^\s\"'<>,)\]]+")
@@ -73,10 +73,7 @@ def start_command_hint(generation: str) -> str:
     known = START_COMMANDS.get(generation)
     if known:
         return f"`{known}`"
-    return (
-        "`foundry service start` (service-based CLI) or "
-        "`foundry server start` (CLI 0.10.0+)"
-    )
+    return "`foundry service start` (service-based CLI) or `foundry server start` (CLI 0.10.0+)"
 
 
 def in_container() -> bool:
