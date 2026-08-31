@@ -236,7 +236,7 @@ class BackendHealth:
                     ),
                     timeout=self._timeout,
                 )
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 self.readiness = Readiness(
                     ready=False,
                     checked_at=time.monotonic(),
