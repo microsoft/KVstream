@@ -43,9 +43,9 @@ pytest tests/integration/   # requires Python only, no real backend
 Lint and format:
 
 ```bash
-ruff check kvstream/
-ruff format kvstream/
-mypy kvstream/
+ruff check src/kvstream tests
+ruff format src/kvstream tests
+mypy src/kvstream
 ```
 
 ---
@@ -84,7 +84,7 @@ See `kvstream/backends/ollama.py` as a reference for streaming backends and
 ## Pull request checklist
 
 - [ ] Tests pass: `pytest tests/`
-- [ ] Lint passes: `ruff check kvstream/` and `ruff format --check kvstream/`
+- [ ] Lint passes: `ruff check src/kvstream tests` and `ruff format --check src/kvstream tests`
 - [ ] New features have tests
 - [ ] `README.md` updated if adding a feature or backend
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)

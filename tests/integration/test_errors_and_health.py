@@ -183,13 +183,13 @@ async def test_reachable_but_not_serving_is_degraded():
     Real Foundry Local answered /v1/models in 4ms for minutes while a 4-token
     generation never returned. Liveness alone said everything was fine.
     """
-    app, _ = _app(BrokenBackend(healthy=True))   # /v1/models ok, generation fails
+    app, _ = _app(BrokenBackend(healthy=True))  # /v1/models ok, generation fails
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
     body = r.json()
     assert r.status_code == 503
-    assert body["backend_reachable"] is True     # liveness passes...
-    assert body["backend_serving"] is False      # ...readiness does not
+    assert body["backend_reachable"] is True  # liveness passes...
+    assert body["backend_serving"] is False  # ...readiness does not
     assert body["readiness"]["ready"] is False
     assert "not serving" in body["hint"]
 
@@ -205,9 +205,9 @@ async def test_readiness_is_cached_so_the_probe_is_not_load():
         for _ in range(5):
             await c.get("/health")
         cached = backend.once_calls
-        await c.get("/health?probe=true")          # explicit refresh
-    assert cached == 1                              # five checks, one generation
-    assert backend.once_calls == 2                  # forced probe ran
+        await c.get("/health?probe=true")  # explicit refresh
+    assert cached == 1  # five checks, one generation
+    assert backend.once_calls == 2  # forced probe ran
 
 
 def test_refuses_to_start_as_one_of_several_workers(monkeypatch):

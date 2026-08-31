@@ -134,8 +134,8 @@ class FoundryClient:
 
         self._cooldown = max(0.0, discovery_cooldown)
         self._last_scan_at: float | None = None
-        self.scans = 0            # full localhost sweeps performed
-        self.resolutions = 0      # times a new backend URL was adopted
+        self.scans = 0  # full localhost sweeps performed
+        self.resolutions = 0  # times a new backend URL was adopted
 
         # None = untested, True = supported, False = rejected once, stop sending.
         self._use_stream_options: bool | None = True if request_usage else False
@@ -220,9 +220,10 @@ class FoundryClient:
 
         async with self._lock:
             # Another coroutine may have re-resolved while we waited.
-            if self._resolved_url and await discovery.probe_url(
-                self._client, self._resolved_url
-            ) is not None:
+            if (
+                self._resolved_url
+                and await discovery.probe_url(self._client, self._resolved_url) is not None
+            ):
                 return self._resolved_url
 
             # Cooldown: resolution spawns subprocesses and probes every
@@ -358,9 +359,7 @@ class FoundryClient:
             raise self.unreachable(url, exc) from exc
         if resp.status_code >= 400:
             detail = resp.text
-            raise FoundryError(
-                f"Foundry Local returned HTTP {resp.status_code}: {detail[:200]}"
-            )
+            raise FoundryError(f"Foundry Local returned HTTP {resp.status_code}: {detail[:200]}")
         try:
             data = resp.json()
         except ValueError as exc:
@@ -447,9 +446,7 @@ class FoundryClient:
     async def list_models(self) -> list[str]:
         try:
             url = await self.resolve_url()
-            r = await self._client.get(
-                f"{url}/v1/models", timeout=5.0, headers=self._headers()
-            )
+            r = await self._client.get(f"{url}/v1/models", timeout=5.0, headers=self._headers())
             r.raise_for_status()
             return [m["id"] for m in r.json().get("data", [])]
         except Exception:  # noqa: BLE001
@@ -470,8 +467,10 @@ class FoundryClient:
             return resp.status_code, resp.json()
         except ValueError:
             return resp.status_code, {
-                "error": {"message": "Foundry Local returned a non-JSON body",
-                          "type": "upstream_error"}
+                "error": {
+                    "message": "Foundry Local returned a non-JSON body",
+                    "type": "upstream_error",
+                }
             }
 
     async def health(self) -> bool:

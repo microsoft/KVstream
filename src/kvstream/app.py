@@ -190,9 +190,12 @@ class Gateway:
         self.backend_healthy = False
         logger.info(
             "admission: %s budget=%d (%s) reserve_ratio=%.2f | cache=%s | coalesce=%s",
-            self.capacity.unit, self.capacity.budget,
-            self.budget_provenance.get("source"), self.capacity.reserve_ratio,
-            self.cache is not None, self.coalescer is not None,
+            self.capacity.unit,
+            self.capacity.budget,
+            self.budget_provenance.get("source"),
+            self.capacity.reserve_ratio,
+            self.cache is not None,
+            self.coalescer is not None,
         )
         if self.capacity.reserve_ratio < 1.0:
             logger.warning(
@@ -244,7 +247,9 @@ class Gateway:
             if (budget, unit) != (self.capacity.budget, self.capacity.unit):
                 logger.info(
                     "re-resolved admission budget after CLI detection: %s %d (%s)",
-                    unit, budget, provenance.get("source"),
+                    unit,
+                    budget,
+                    provenance.get("source"),
                 )
                 self.capacity, self.budget_provenance = build_capacity_manager(
                     self.settings.admission, key
@@ -260,7 +265,8 @@ class Gateway:
         if not self.backend_healthy:
             logger.warning(
                 "Foundry Local is not reachable at %s. %s",
-                self.backend.base_url, self.backend.unreachable_hint(),
+                self.backend.base_url,
+                self.backend.unreachable_hint(),
             )
         await self._warn_if_model_unknown(cli)
         await self._learn_geometry(cli)
@@ -428,9 +434,7 @@ class Gateway:
         unused headroom returns to the budget before the response has finished
         being written back to the client.
         """
-        delta = await self.capacity.adjust(
-            req_id, self.capacity.live_cost(rc, generated_tokens)
-        )
+        delta = await self.capacity.adjust(req_id, self.capacity.live_cost(rc, generated_tokens))
         if delta > 0:
             self.metrics.overshoot.inc()
         elif delta < 0:
@@ -452,9 +456,7 @@ class Gateway:
         started = time.perf_counter()
         try:
             try:
-                body = await self.backend.chat_once(
-                    backend_payload(raw, stream=False), auth
-                )
+                body = await self.backend.chat_once(backend_payload(raw, stream=False), auth)
             except FoundryError as exc:
                 self._record_backend_failure("nonstreaming", exc)
                 self.metrics.requests.labels(ROUTE_CHAT, "error").inc()
@@ -562,9 +564,7 @@ class Gateway:
         # await, and anything identical arriving in that window has to be able
         # to find this stream — otherwise every concurrent duplicate becomes its
         # own leader and coalescing never happens under the load it exists for.
-        broadcast = (
-            self.stream_coalescer.lead(key) if key and self.stream_coalescer else None
-        )
+        broadcast = self.stream_coalescer.lead(key) if key and self.stream_coalescer else None
 
         def _abandon_lead() -> None:
             if broadcast is not None and self.stream_coalescer and key:
@@ -646,9 +646,7 @@ class Gateway:
                 await agen.aclose()
                 # Always settle: this calibrates the estimator from real usage
                 # even when caching is disabled.
-                _, completion_tokens = self._settle(
-                    req, rc.prompt_tokens, "".join(parts), usage
-                )
+                _, completion_tokens = self._settle(req, rc.prompt_tokens, "".join(parts), usage)
                 if failure is None:
                     self._record_backend_success(
                         time.perf_counter() - stream_started,
@@ -821,7 +819,7 @@ class Gateway:
                 status_code=400, detail="a `file` part is required for transcription"
             )
 
-        content = await upload.read()  # type: ignore[union-attr]
+        content = await upload.read()
         if len(content) > max_bytes:
             self._reject_oversized(len(content), max_bytes)
 
@@ -968,8 +966,7 @@ def _client_chunk(tok: Token, req: ChatCompletionRequest, req_id: str) -> dict |
             "created": int(time.time()),
             "model": req.model,
             "choices": [
-                {"index": 0, "delta": {"content": tok.text},
-                 "finish_reason": tok.finish_reason}
+                {"index": 0, "delta": {"content": tok.text}, "finish_reason": tok.finish_reason}
             ],
         }
     if tok.usage is not None and not req.wants_usage:
@@ -1240,11 +1237,10 @@ def build_app(settings: Settings | None = None) -> FastAPI:
                     "enabled": True,
                     "inflight": gw.coalescer.inflight,
                     "coalesced_total": gw.coalescer.coalesced_total,
-                    "streaming": (
-                        gw.stream_coalescer.stats() if gw.stream_coalescer else None
-                    ),
+                    "streaming": (gw.stream_coalescer.stats() if gw.stream_coalescer else None),
                 }
-                if gw.coalescer else {"enabled": False}
+                if gw.coalescer
+                else {"enabled": False}
             ),
             "model_geometry": gw.geometry.stats(),
         }
@@ -1284,9 +1280,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             gw.audio_capacity.stats(),
             gw.calibration_age(),
         )
-        gw.metrics.circuit_state.set(
-            _CIRCUIT_STATES.get(gw.health.breaker.state, 0)
-        )
+        gw.metrics.circuit_state.set(_CIRCUIT_STATES.get(gw.health.breaker.state, 0))
         gw.metrics.backend_ready.set(1 if gw.health.readiness.ready else 0)
         if gw.drift.ratio:
             gw.metrics.drift_ratio.set(gw.drift.ratio)
@@ -1302,9 +1296,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         rc, cost = gw._cost(req)
         key = request_key(req, raw) if req.deterministic else None
         auth = _auth(request)
-        directive = cache_directive(
-            request.headers, settings.cache.respect_request_headers
-        )
+        directive = cache_directive(request.headers, settings.cache.respect_request_headers)
 
         # Cache lookup (deterministic requests only). The key includes `stream`,
         # so an entry is only ever replayed in the shape it was recorded in.

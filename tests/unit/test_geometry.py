@@ -58,7 +58,7 @@ def test_grouped_query_attention_uses_kv_heads_not_attention_heads():
     g = from_config(GQA)
     assert g is not None
     assert g.kv_heads == 8
-    assert g.head_dim == 3072 // 32       # derived from hidden_size / heads
+    assert g.head_dim == 3072 // 32  # derived from hidden_size / heads
 
 
 def test_head_dim_is_derived_when_absent():

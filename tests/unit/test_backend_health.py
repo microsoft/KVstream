@@ -82,7 +82,7 @@ def test_an_open_breaker_half_opens_after_the_cooldown():
     b = CircuitBreaker(failure_threshold=1, reset_seconds=0.0)
     b.record_failure("dead")
     assert b.state == OPEN
-    assert b.allows() is True          # cooldown elapsed: one trial
+    assert b.allows() is True  # cooldown elapsed: one trial
     assert b.state == HALF_OPEN
 
 
@@ -90,8 +90,8 @@ def test_only_one_trial_passes_while_half_open():
     """A recovering backend must not be hit by the whole backlog at once."""
     b = CircuitBreaker(failure_threshold=1, reset_seconds=0.0)
     b.record_failure("dead")
-    assert b.allows() is True          # the trial
-    assert b.allows() is False         # everyone else keeps failing fast
+    assert b.allows() is True  # the trial
+    assert b.allows() is False  # everyone else keeps failing fast
     assert b.allows() is False
 
 
@@ -99,9 +99,9 @@ def test_a_failed_trial_reopens_immediately():
     b = CircuitBreaker(failure_threshold=5, reset_seconds=0.0)
     for _ in range(5):
         b.record_failure("dead")
-    b.allows()                          # -> half open
+    b.allows()  # -> half open
     b.record_failure("still dead")
-    assert b.state == OPEN              # straight back, without another 5
+    assert b.state == OPEN  # straight back, without another 5
 
 
 def test_a_successful_trial_closes_the_breaker():
@@ -134,9 +134,9 @@ def test_fast_failures_are_counted():
 async def test_reachable_but_unable_to_generate_is_not_ready():
     """The exact shape of the measured failure."""
     health = BackendHealth(FakeClient(alive=True, generates=False))
-    assert await health.check_reachable() is True      # liveness passes
+    assert await health.check_reachable() is True  # liveness passes
     readiness = await health.check_ready("m")
-    assert readiness.ready is False                    # readiness does not
+    assert readiness.ready is False  # readiness does not
     assert "rejected a 1-token generation" in readiness.detail
 
 
@@ -193,14 +193,14 @@ async def test_probing_can_be_disabled():
     await health.check_reachable()
     readiness = await health.check_ready("m")
     assert client.generations == 0
-    assert readiness.ready is True                 # falls back to liveness
+    assert readiness.ready is True  # falls back to liveness
     assert "disabled" in readiness.detail
 
 
 @pytest.mark.asyncio
 async def test_guard_raises_only_when_open():
     health = BackendHealth(FakeClient(), breaker=CircuitBreaker(failure_threshold=1))
-    health.guard()                                  # closed: fine
+    health.guard()  # closed: fine
     health.record_failure("dead")
     with pytest.raises(BackendUnavailable, match="not serving"):
         health.guard()
