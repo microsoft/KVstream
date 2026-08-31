@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.datastructures import UploadFile
 
 from kvstream.admission import (
     UNKNOWN,
@@ -826,7 +827,7 @@ class Gateway:
             ) from exc
 
         upload = form.get("file")
-        if upload is None or not hasattr(upload, "read"):
+        if not isinstance(upload, UploadFile):
             raise HTTPException(
                 status_code=400, detail="a `file` part is required for transcription"
             )
