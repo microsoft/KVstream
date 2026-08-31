@@ -102,7 +102,9 @@ async def _run_workload(
 
 @pytest.mark.asyncio
 async def test_ac4a_small_requests_token_budget_admits_more():
-    sizes = [200] * 40  # 40 cheap requests; 8 x 200 = 1,600 tokens is well under capacity
+    sizes = [
+        200
+    ] * 40  # 40 cheap requests; 8 x 200 = 1,600 tokens is well under capacity
 
     tokens_dev = await _run_workload(_make_manager("tokens"), sizes)
     count_dev = await _run_workload(_make_manager("concurrency"), sizes)

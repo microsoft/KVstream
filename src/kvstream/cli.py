@@ -75,7 +75,9 @@ def serve(
     host: str | None = typer.Option(None, help="Bind address"),
     port: int | None = typer.Option(None, help="Gateway port"),
     model: str | None = typer.Option(None, help="Foundry Local model id"),
-    backend_url: str | None = typer.Option(None, "--backend-url", help="Foundry Local base URL"),
+    backend_url: str | None = typer.Option(
+        None, "--backend-url", help="Foundry Local base URL"
+    ),
     mode: str | None = typer.Option(None, help="admission mode: concurrency | tokens"),
     max_concurrency: int | None = typer.Option(None, help="concurrency-mode limit"),
 ) -> None:
@@ -83,7 +85,9 @@ def serve(
     from kvstream.server import serve as _serve
 
     s = _settings(
-        config, host=host, port=port,
+        config,
+        host=host,
+        port=port,
     )
     if model is not None:
         s.backend.model = model
@@ -137,7 +141,15 @@ def status(url: str = typer.Option("http://localhost:8080")) -> None:
     t = Table(title=f"KVStream — {url}")
     t.add_column("Metric", style="cyan")
     t.add_column("Value", style="green")
-    for k in ("unit", "budget", "in_flight", "utilization", "waiting", "active", "overshoots"):
+    for k in (
+        "unit",
+        "budget",
+        "in_flight",
+        "utilization",
+        "waiting",
+        "active",
+        "overshoots",
+    ):
         t.add_row(k, str(a.get(k)))
     queue = a.get("queue", {})
     t.add_row("queue peak", str(queue.get("peak_depth")))
@@ -159,10 +171,13 @@ def calibrate(
         "Defaults to a derived platform string.",
     ),
     max_concurrency: int = typer.Option(32, help="highest sweep concurrency"),
-    trials: int = typer.Option(3, help="repeats per sweep point (pooled before the percentile)"),
+    trials: int = typer.Option(
+        3, help="repeats per sweep point (pooled before the percentile)"
+    ),
     warmup: int = typer.Option(1, help="warm-up requests before measuring"),
     refine: bool = typer.Option(
-        True, "--refine/--no-refine",
+        True,
+        "--refine/--no-refine",
         help="bisect between the last healthy point and the first unhealthy one",
     ),
 ) -> None:
@@ -181,8 +196,10 @@ def calibrate(
 
     async def _run() -> int:
         client = FoundryClient(
-            base_url=s.backend.base_url, model=s.backend.model,
-            timeout=s.backend.timeout_seconds, discover=s.backend.discover,
+            base_url=s.backend.base_url,
+            model=s.backend.model,
+            timeout=s.backend.timeout_seconds,
+            discover=s.backend.discover,
             discovery_cooldown=s.backend.discovery_cooldown_seconds,
             request_usage=s.backend.request_usage,
         )

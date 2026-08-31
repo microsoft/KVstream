@@ -50,7 +50,13 @@ CODE_FRAGMENTS = [
     "        return 1.0 if mine is None else mine.kv_bytes_per_token / self._anchor_bytes\n",
 ]
 
-TOOL_NAMES = ["get_weather", "search_documents", "run_query", "send_email", "list_files"]
+TOOL_NAMES = [
+    "get_weather",
+    "search_documents",
+    "run_query",
+    "send_email",
+    "list_files",
+]
 CITIES = ["Lisbon", "Seattle", "Reykjavik", "Bengaluru", "Kraków"]
 
 
@@ -65,7 +71,11 @@ def _json_blob(rng: random.Random, rows: int) -> str:
                 "id": f"doc-{rng.randint(1000, 9999)}",
                 "score": round(rng.random(), 6),
                 "title": _prose(rng, 1)[:60],
-                "metadata": {"source": "index", "chunk": rng.randint(0, 40), "lang": "en"},
+                "metadata": {
+                    "source": "index",
+                    "chunk": rng.randint(0, 40),
+                    "lang": "en",
+                },
             }
             for _ in range(rows)
         ],
@@ -96,7 +106,11 @@ def _chat_transcript(rng: random.Random, turns: int) -> str:
                 }
             ],
         },
-        {"role": "tool", "tool_call_id": "call_x", "content": f"{rng.randint(-5, 35)}C, clear"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_x",
+            "content": f"{rng.randint(-5, 35)}C, clear",
+        },
     ]
     for _ in range(turns):
         messages.append({"role": "user", "content": _prose(rng, 1)})

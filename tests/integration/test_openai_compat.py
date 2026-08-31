@@ -58,7 +58,11 @@ TOOL_RESPONSE_BODY = {
     "choices": [
         {
             "index": 0,
-            "message": {"role": "assistant", "content": None, "tool_calls": [TOOL_CALL]},
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [TOOL_CALL],
+            },
             "logprobs": None,
             "finish_reason": "tool_calls",
         }
@@ -69,21 +73,64 @@ TOOL_RESPONSE_BODY = {
 # Raw SSE chunks as a real server sends them: a role-only opener, tool-call
 # argument deltas, a finish chunk, then usage.
 TOOL_STREAM_CHUNKS = [
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"tool_calls": [
-         {"index": 0, "id": "call_abc", "type": "function",
-          "function": {"name": "get_weather", "arguments": ""}}]}, "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {"tool_calls": [
-         {"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}]},
-         "finish_reason": None}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
-    {"id": "c1", "object": "chat.completion.chunk", "model": "backend-model-name",
-     "choices": [], "usage": {"prompt_tokens": 31, "completion_tokens": 12,
-                              "total_tokens": 43}},
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [
+            {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
+        ],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_abc",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": ""},
+                        }
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {"index": 0, "function": {"arguments": '{"city":"Lisbon"}'}}
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+    },
+    {
+        "id": "c1",
+        "object": "chat.completion.chunk",
+        "model": "backend-model-name",
+        "choices": [],
+        "usage": {"prompt_tokens": 31, "completion_tokens": 12, "total_tokens": 43},
+    },
 ]
 
 
@@ -102,7 +149,11 @@ class EchoBackend:
             "object": "text_completion",
             "choices": [{"index": 0, "text": "hello", "finish_reason": "stop"}],
         }
-        self.model_detail = {"id": "phi-3-mini", "object": "model", "owned_by": "foundry"}
+        self.model_detail = {
+            "id": "phi-3-mini",
+            "object": "model",
+            "owned_by": "foundry",
+        }
         self.status = 200
 
     async def chat(self, payload, headers=None):
@@ -133,7 +184,11 @@ class EchoBackend:
     async def embeddings(self, payload, headers=None):
         self.payloads.append(payload)
         self.headers.append(headers)
-        return self.status, {"object": "list", "data": [], "usage": {"prompt_tokens": 3}}
+        return self.status, {
+            "object": "list",
+            "data": [],
+            "usage": {"prompt_tokens": 3},
+        }
 
     async def get_model(self, model_id, headers=None):
         self.headers.append(headers)
@@ -163,7 +218,9 @@ def _build(**overrides):
     settings.backend.model = "stub-model"
     for dotted, value in overrides.items():
         section, _, field = dotted.partition(".")
-        setattr(getattr(settings, section) if field else settings, field or section, value)
+        setattr(
+            getattr(settings, section) if field else settings, field or section, value
+        )
     app = build_app(settings)
     backend = EchoBackend()
     app.state.gateway.backend = backend
@@ -173,7 +230,9 @@ def _build(**overrides):
 @pytest_asyncio.fixture
 async def client():
     app, gw, backend = _build()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, gw, backend
 
 
@@ -196,8 +255,12 @@ async def test_a_tool_calling_turn_is_accepted_and_forwarded(client):
     c, _, backend = client
     r = await c.post(
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-              "tool_choice": "auto"},
+        json={
+            "model": "stub-model",
+            "messages": AGENT_MESSAGES,
+            "tools": [TOOL],
+            "tool_choice": "auto",
+        },
     )
     assert r.status_code == 200
 
@@ -241,7 +304,11 @@ async def test_sampling_and_format_fields_are_not_dropped(client):
     }
     await c.post(
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": [{"role": "user", "content": "hi"}], **extras},
+        json={
+            "model": "stub-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            **extras,
+        },
     )
     sent = backend.payloads[0]
     for field, value in extras.items():
@@ -290,18 +357,25 @@ async def test_streamed_tool_call_deltas_survive(client):
     async with c.stream(
         "POST",
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-              "stream": True},
+        json={
+            "model": "stub-model",
+            "messages": AGENT_MESSAGES,
+            "tools": [TOOL],
+            "stream": True,
+        },
     ) as resp:
         assert resp.status_code == 200
         text = "".join([chunk async for chunk in resp.aiter_text()])
 
     chunks = _sse_payloads(text)
     assert chunks[0]["choices"][0]["delta"] == {"role": "assistant"}
-    assert chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "get_weather"
-    assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == (
-        '{"city":"Lisbon"}'
+    assert (
+        chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"]
+        == "get_weather"
     )
+    assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"][
+        "arguments"
+    ] == ('{"city":"Lisbon"}')
     assert chunks[3]["choices"][0]["finish_reason"] == "tool_calls"
     assert text.rstrip().endswith("data: [DONE]")
 
@@ -329,8 +403,12 @@ async def test_usage_chunk_is_delivered_when_the_client_asks(client):
     async with c.stream(
         "POST",
         "/v1/chat/completions",
-        json={"model": "stub-model", "messages": AGENT_MESSAGES, "stream": True,
-              "stream_options": {"include_usage": True}},
+        json={
+            "model": "stub-model",
+            "messages": AGENT_MESSAGES,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        },
     ) as resp:
         text = "".join([chunk async for chunk in resp.aiter_text()])
 
@@ -345,9 +423,15 @@ async def test_estimated_usage_is_disclosed_in_a_header(client):
     """When the backend reports nothing, say the counts are ours."""
     c, _, backend = client
     backend.body = {
-        "id": "x", "object": "chat.completion",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"},
-                     "finish_reason": "stop"}],
+        "id": "x",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "hi"},
+                "finish_reason": "stop",
+            }
+        ],
     }
     r = await c.post(
         "/v1/chat/completions",
@@ -381,13 +465,19 @@ async def test_a_cached_tool_call_is_replayed_intact():
     backend = EchoBackend()
     app.state.gateway.backend = backend
 
-    payload = {"model": "stub-model", "messages": AGENT_MESSAGES, "tools": [TOOL],
-               "temperature": 0.0}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    payload = {
+        "model": "stub-model",
+        "messages": AGENT_MESSAGES,
+        "tools": [TOOL],
+        "temperature": 0.0,
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         first = await c.post("/v1/chat/completions", json=payload)
         second = await c.post("/v1/chat/completions", json=payload)
 
-    assert len(backend.payloads) == 1          # second served from cache
+    assert len(backend.payloads) == 1  # second served from cache
     assert first.json() == second.json()
     assert second.json()["choices"][0]["message"]["tool_calls"] == [TOOL_CALL]
 
@@ -401,9 +491,15 @@ async def test_a_cached_stream_replays_the_recorded_chunks():
     backend = EchoBackend()
     app.state.gateway.backend = backend
 
-    payload = {"model": "stub-model", "messages": AGENT_MESSAGES, "temperature": 0.0,
-               "stream": True}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    payload = {
+        "model": "stub-model",
+        "messages": AGENT_MESSAGES,
+        "temperature": 0.0,
+        "stream": True,
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         async with c.stream("POST", "/v1/chat/completions", json=payload) as r1:
             live = "".join([chunk async for chunk in r1.aiter_text()])
         async with c.stream("POST", "/v1/chat/completions", json=payload) as r2:
@@ -425,7 +521,9 @@ async def test_streamed_and_non_streamed_entries_do_not_collide():
     app.state.gateway.backend = backend
 
     base = {"model": "stub-model", "messages": AGENT_MESSAGES, "temperature": 0.0}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         plain = await c.post("/v1/chat/completions", json=base)
         async with c.stream(
             "POST", "/v1/chat/completions", json={**base, "stream": True}
@@ -434,7 +532,7 @@ async def test_streamed_and_non_streamed_entries_do_not_collide():
 
     assert plain.json()["object"] == "chat.completion"
     assert _sse_payloads(body)[0]["object"] == "chat.completion.chunk"
-    assert len(backend.payloads) == 2   # each shape fetched once
+    assert len(backend.payloads) == 2  # each shape fetched once
 
 
 # -- auth passthrough ---------------------------------------------------
@@ -455,10 +553,15 @@ async def test_authorization_header_is_forwarded(client):
 @pytest.mark.asyncio
 async def test_authorization_forwarding_can_be_disabled():
     app, _, backend = _build(**{"backend.forward_authorization": False})
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         await c.post(
             "/v1/chat/completions",
-            json={"model": "stub-model", "messages": [{"role": "user", "content": "hi"}]},
+            json={
+                "model": "stub-model",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
             headers={"Authorization": "Bearer caller-token"},
         )
     assert backend.headers[0] is None
@@ -484,7 +587,9 @@ async def test_legacy_completions_are_proxied_and_admitted(client):
 @pytest.mark.asyncio
 async def test_completions_can_be_turned_off():
     app, _, _ = _build(**{"routes.completions": False})
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         r = await c.post("/v1/completions", json={"model": "m", "prompt": "x"})
     assert r.status_code == 404
 
@@ -527,11 +632,13 @@ async def test_admission_costs_n_choices_and_the_default_budget():
 
     msgs = [{"role": "user", "content": "hi"}]
     _, one = gw._cost(ChatCompletionRequest(model="m", messages=msgs, max_tokens=100))
-    _, four = gw._cost(ChatCompletionRequest(model="m", messages=msgs, max_tokens=100, n=4))
+    _, four = gw._cost(
+        ChatCompletionRequest(model="m", messages=msgs, max_tokens=100, n=4)
+    )
     _, default = gw._cost(ChatCompletionRequest(model="m", messages=msgs))
 
-    assert four - one == 300           # three extra completions of 100
-    assert default - one == 400        # 500 assumed instead of 100
+    assert four - one == 300  # three extra completions of 100
+    assert default - one == 400  # 500 assumed instead of 100
 
 
 @pytest.mark.asyncio

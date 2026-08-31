@@ -39,7 +39,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from corpus import build_corpus  # noqa: E402
 
-from kvstream.tokenization import TokenEstimator, count_units, estimate_tokens  # noqa: E402
+from kvstream.tokenization import (
+    TokenEstimator,
+    count_units,
+    estimate_tokens,
+)  # noqa: E402
 
 REFERENCE_ENCODING = "cl100k_base"
 
@@ -49,7 +53,7 @@ class Scores:
     """Error statistics for one estimator over one set of samples."""
 
     name: str
-    errors: list[float] = field(default_factory=list)      # signed relative error
+    errors: list[float] = field(default_factory=list)  # signed relative error
     pairs: list[tuple[int, int]] = field(default_factory=list)
     under: int = 0
     total: int = 0
@@ -67,7 +71,9 @@ class Scores:
         """Under-count rate if every estimate were scaled by ``safety_factor``."""
         if not self.pairs:
             return 0.0
-        missed = sum(1 for est, act in self.pairs if math.ceil(est * safety_factor) < act)
+        missed = sum(
+            1 for est, act in self.pairs if math.ceil(est * safety_factor) < act
+        )
         return missed / len(self.pairs)
 
     def safety_factor_for_zero_under(self) -> float:
@@ -161,7 +167,9 @@ def run(seed: int, per_shape: int, train_fraction: float) -> dict:
         "calibrated_by_shape": {k: v.as_dict() for k, v in per_shape_scores.items()},
         "learned": estimator.stats(),
         "safety": {
-            "needed_for_zero_under": round(calibrated.safety_factor_for_zero_under(), 3),
+            "needed_for_zero_under": round(
+                calibrated.safety_factor_for_zero_under(), 3
+            ),
             "under_rate_by_factor": {
                 str(f): round(calibrated.under_rate_at(f), 4)
                 for f in (1.0, 1.1, 1.25, 1.5, 2.0)
@@ -195,7 +203,9 @@ def main() -> None:
 
     result = run(args.seed, args.per_shape, args.train_fraction)
 
-    print(f"Reference tokenizer : {result['reference']} (NOT a Foundry Local model tokenizer)")
+    print(
+        f"Reference tokenizer : {result['reference']} (NOT a Foundry Local model tokenizer)"
+    )
     print(f"Held-out samples    : {result['held_out_samples']}")
     print()
     print(_table(result["estimators"]))
@@ -213,7 +223,9 @@ def main() -> None:
     print(f"Worst under-count   : {worst * 100:.1f}% (KVStream estimators)")
     print()
     safety = result["safety"]
-    print("Under-count rate of the calibrated estimator by admission.token_safety_factor:")
+    print(
+        "Under-count rate of the calibrated estimator by admission.token_safety_factor:"
+    )
     for factor, rate in safety["under_rate_by_factor"].items():
         print(f"  {factor:>4} -> {rate * 100:5.1f}%")
     print(

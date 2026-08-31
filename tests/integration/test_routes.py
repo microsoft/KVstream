@@ -40,7 +40,9 @@ def _app(**overrides):
 @pytest_asyncio.fixture
 async def client():
     app, gw, stub = _app(mode="tokens", budget_tokens=100_000)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, gw, stub
 
 
@@ -64,7 +66,9 @@ async def test_embeddings_are_proxied_verbatim(client):
 @pytest.mark.asyncio
 async def test_embeddings_accept_a_batch(client):
     c, _, stub = client
-    r = await c.post("/v1/embeddings", json={"model": "stub-model", "input": ["a", "b", "c"]})
+    r = await c.post(
+        "/v1/embeddings", json={"model": "stub-model", "input": ["a", "b", "c"]}
+    )
     assert r.status_code == 200
     assert len(r.json()["data"]) == 3
 
@@ -74,7 +78,12 @@ async def test_embeddings_forward_optional_fields_but_not_absent_ones(client):
     c, _, stub = client
     await c.post(
         "/v1/embeddings",
-        json={"model": "stub-model", "input": "x", "dimensions": 256, "encoding_format": "float"},
+        json={
+            "model": "stub-model",
+            "input": "x",
+            "dimensions": 256,
+            "encoding_format": "float",
+        },
     )
     payload = stub.embedding_payloads[0]
     assert payload["dimensions"] == 256
@@ -159,7 +168,7 @@ async def test_transcription_uses_its_own_limiter_not_the_token_budget(client):
     c, gw, _ = client
     await c.post("/v1/audio/transcriptions", files=AUDIO, data={"model": "stub-model"})
     assert gw.capacity.in_flight == 0
-    assert gw.capacity.reclaimed == 0          # never went near the KV budget
+    assert gw.capacity.reclaimed == 0  # never went near the KV budget
     assert gw.audio_capacity.in_flight == 0
     assert gw.audio_capacity.unit == "concurrency"
 
@@ -169,10 +178,16 @@ async def test_audio_concurrency_is_capped():
     """The whole point of a separate limiter is that it actually limits."""
     app, gw, stub = _app(audio_max_concurrency=2)
     stub.transcribe_delay = 0.05
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         await asyncio.gather(
             *[
-                c.post("/v1/audio/transcriptions", files=AUDIO, data={"model": "stub-model"})
+                c.post(
+                    "/v1/audio/transcriptions",
+                    files=AUDIO,
+                    data={"model": "stub-model"},
+                )
                 for _ in range(6)
             ]
         )
@@ -184,8 +199,12 @@ async def test_audio_concurrency_is_capped():
 async def test_oversized_uploads_are_rejected_with_413():
     app, _, stub = _app(audio_max_upload_mb=1)
     big = {"file": ("big.wav", b"\0" * (2 * 1024 * 1024), "audio/wav")}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.post("/v1/audio/transcriptions", files=big, data={"model": "stub-model"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.post(
+            "/v1/audio/transcriptions", files=big, data={"model": "stub-model"}
+        )
     assert r.status_code == 413
     assert "audio_max_upload_mb" in r.json()["error"]["message"]
     assert stub.transcribe_calls == []
@@ -205,9 +224,13 @@ async def test_a_missing_file_part_is_a_400(client):
 @pytest.mark.asyncio
 async def test_routes_can_be_turned_off():
     app, _, _ = _app(embeddings=False, transcriptions=False)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         embed = await c.post("/v1/embeddings", json={"model": "m", "input": "x"})
-        audio = await c.post("/v1/audio/transcriptions", files=AUDIO, data={"model": "m"})
+        audio = await c.post(
+            "/v1/audio/transcriptions", files=AUDIO, data={"model": "m"}
+        )
     assert embed.status_code == 404
     assert audio.status_code == 404
 

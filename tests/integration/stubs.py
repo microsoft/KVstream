@@ -35,7 +35,7 @@ class StubBackend:
         self.transcribe_content_type = "application/json"
         self.transcribe_delay = 0.0
         self.stream_delay = 0.0
-        self.reply: str | None = None   # overrides PIECES when set
+        self.reply: str | None = None  # overrides PIECES when set
         self.concurrent_transcriptions = 0
         self.peak_transcriptions = 0
 
@@ -84,7 +84,9 @@ class StubBackend:
             "usage": {"prompt_tokens": 7 * len(texts), "total_tokens": 7 * len(texts)},
         }
 
-    async def transcribe(self, files, data, timeout=None, headers=None) -> tuple[int, bytes, str]:
+    async def transcribe(
+        self, files, data, timeout=None, headers=None
+    ) -> tuple[int, bytes, str]:
         self.calls += 1
         self.transcribe_calls.append((files, data))
         self.concurrent_transcriptions += 1
@@ -94,7 +96,11 @@ class StubBackend:
         try:
             if self.transcribe_delay:
                 await asyncio.sleep(self.transcribe_delay)
-            return self.transcribe_status, self.transcribe_body, self.transcribe_content_type
+            return (
+                self.transcribe_status,
+                self.transcribe_body,
+                self.transcribe_content_type,
+            )
         finally:
             self.concurrent_transcriptions -= 1
 

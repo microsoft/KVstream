@@ -43,10 +43,10 @@ from urllib.parse import urlparse
 logger = logging.getLogger("kvstream.foundry_cli")
 
 # CLI generations.
-GEN_SDK = "0.10.x"        # foundry server / foundry status
-GEN_SERVICE = "service"   # foundry service start|status
-GEN_UNKNOWN = "unknown"   # a foundry binary we could not classify
-GEN_ABSENT = "absent"     # no foundry binary on PATH
+GEN_SDK = "0.10.x"  # foundry server / foundry status
+GEN_SERVICE = "service"  # foundry service start|status
+GEN_UNKNOWN = "unknown"  # a foundry binary we could not classify
+GEN_ABSENT = "absent"  # no foundry binary on PATH
 
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _URL_RE = re.compile(r"https?://[^\s\"'<>,)\]]+")
@@ -197,7 +197,9 @@ async def detect(cli_path: str | None = None, timeout: float = 5.0) -> FoundryCl
 
     result = await _run_async([path, "--version"], timeout)
     if result is None:
-        return FoundryCli(path=path, generation=GEN_UNKNOWN, detail="`foundry --version` failed")
+        return FoundryCli(
+            path=path, generation=GEN_UNKNOWN, detail="`foundry --version` failed"
+        )
 
     code, output = result
     version, generation = _classify(output)
@@ -215,7 +217,9 @@ def _walk_for_urls(node: object, key_path: str = "") -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     if isinstance(node, dict):
         for key, value in node.items():
-            found.extend(_walk_for_urls(value, f"{key_path}.{key}" if key_path else str(key)))
+            found.extend(
+                _walk_for_urls(value, f"{key_path}.{key}" if key_path else str(key))
+            )
     elif isinstance(node, list):
         for index, value in enumerate(node):
             found.extend(_walk_for_urls(value, f"{key_path}[{index}]"))
@@ -268,7 +272,9 @@ async def query_endpoint(cli: FoundryCli, timeout: float = 5.0) -> CliEndpoint |
             logger.debug("foundry CLI endpoint query raised: %s", exc)
             continue
         if found is not None:
-            logger.info("foundry CLI reported endpoint %s via `%s`", found.url, found.command)
+            logger.info(
+                "foundry CLI reported endpoint %s via `%s`", found.url, found.command
+            )
             return found
     return None
 
@@ -355,7 +361,9 @@ async def list_models(cli: FoundryCli, timeout: float = 5.0) -> list[str] | None
     return _collect_model_ids(payload)
 
 
-async def show_model(cli: FoundryCli, model_id: str, timeout: float = 5.0) -> dict | None:
+async def show_model(
+    cli: FoundryCli, model_id: str, timeout: float = 5.0
+) -> dict | None:
     """
     Raw ``foundry model show <id> --output json``, or ``None`` on any miss.
 
@@ -365,7 +373,9 @@ async def show_model(cli: FoundryCli, model_id: str, timeout: float = 5.0) -> di
     """
     if not cli.available or cli.path is None or cli.generation == GEN_SERVICE:
         return None
-    result = await _run_async([cli.path, "model", "show", model_id, "--output", "json"], timeout)
+    result = await _run_async(
+        [cli.path, "model", "show", model_id, "--output", "json"], timeout
+    )
     if result is None:
         return None
     code, output = result
@@ -385,7 +395,9 @@ def _collect_model_ids(payload: object) -> list[str] | None:
     def walk(node: object) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
-                if key.lower() in ("id", "alias", "name", "modelid") and isinstance(value, str):
+                if key.lower() in ("id", "alias", "name", "modelid") and isinstance(
+                    value, str
+                ):
                     ids.append(value)
                 else:
                     walk(value)

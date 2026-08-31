@@ -13,7 +13,9 @@ import pytest
 from kvstream.admission.capacity import CapacityManager, RequestCost
 
 
-def _mgr(budget: int = 1000, unit: str = "tokens", reserve_ratio: float = 1.0) -> CapacityManager:
+def _mgr(
+    budget: int = 1000, unit: str = "tokens", reserve_ratio: float = 1.0
+) -> CapacityManager:
     return CapacityManager(
         budget=budget,
         unit=unit,
@@ -26,7 +28,7 @@ def _mgr(budget: int = 1000, unit: str = "tokens", reserve_ratio: float = 1.0) -
 def test_reserve_ratio_scales_only_the_generation_half():
     rc = RequestCost(prompt_tokens=100, max_tokens=1000)
     assert rc.tokens_at(1.0) == 1100
-    assert rc.tokens_at(0.1) == 200        # prompt is never discounted
+    assert rc.tokens_at(0.1) == 200  # prompt is never discounted
     assert rc.tokens_at(0.5) == 600
 
 
@@ -54,15 +56,15 @@ async def test_reclaimed_budget_admits_a_waiting_request():
     """The point of reclaiming early: queued work starts sooner."""
     cm = _mgr(budget=1000)
     big = RequestCost(prompt_tokens=100, max_tokens=800)
-    await cm.admit("big", cm.cost_of(big))       # 900 of 1000
+    await cm.admit("big", cm.cost_of(big))  # 900 of 1000
 
     small = RequestCost(prompt_tokens=50, max_tokens=200)
-    cost = cm.cost_of(small)                     # 250 — does not fit
+    cost = cm.cost_of(small)  # 250 — does not fit
     assert cm.in_flight + cost > cm.budget
 
     await cm.adjust("big", cm.live_cost(big, 10))  # generation stopped early
     assert cm.in_flight == 110
-    await cm.admit("small", cost)                # now fits, without waiting
+    await cm.admit("small", cost)  # now fits, without waiting
     assert cm.in_flight == 360
 
 
@@ -71,7 +73,7 @@ async def test_growth_beyond_an_under_reservation_is_counted():
     cm = _mgr(reserve_ratio=0.1)
     rc = RequestCost(prompt_tokens=100, max_tokens=1000)
     cost = cm.cost_of(rc)
-    assert cost == 200                            # reserved a tenth of max_tokens
+    assert cost == 200  # reserved a tenth of max_tokens
     await cm.admit("a", cost)
 
     # The generation ran past the reservation. Topping up beats truncating a
@@ -111,7 +113,7 @@ async def test_concurrency_mode_ignores_live_accounting():
     await cm.admit("a", cm.cost_of(rc))
     assert cm.in_flight == 1
     await cm.adjust("a", cm.live_cost(rc, 20))
-    assert cm.in_flight == 1          # a request is always worth one slot
+    assert cm.in_flight == 1  # a request is always worth one slot
     assert cm.reclaimed == 0
 
 

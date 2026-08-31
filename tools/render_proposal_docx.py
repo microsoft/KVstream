@@ -43,7 +43,9 @@ HEAD_FONT = "Segoe UI"
 MONO_FONT = "Consolas"
 
 # **bold** | *italic* | `code` | [text](url) — anything else is plain text.
-INLINE = re.compile(r"(\*\*.+?\*\*|(?<!\*)\*(?!\*).+?(?<!\*)\*(?!\*)|`[^`]+`|\[[^\]]+\]\([^)]+\))")
+INLINE = re.compile(
+    r"(\*\*.+?\*\*|(?<!\*)\*(?!\*).+?(?<!\*)\*(?!\*)|`[^`]+`|\[[^\]]+\]\([^)]+\))"
+)
 
 
 # ----------------------------------------------------------------------
@@ -55,7 +57,7 @@ def build_document() -> Document:
     doc = Document()
 
     section = doc.sections[0]
-    section.page_width, section.page_height = Cm(21.0), Cm(29.7)   # A4
+    section.page_width, section.page_height = Cm(21.0), Cm(29.7)  # A4
     section.top_margin = section.bottom_margin = Cm(2.0)
     section.left_margin = section.right_margin = Cm(2.0)
 
@@ -134,7 +136,9 @@ def _add_page_numbers(section) -> None:
 # ----------------------------------------------------------------------
 
 
-def write_inline(paragraph, text: str, *, bold: bool = False, italic: bool = False) -> None:
+def write_inline(
+    paragraph, text: str, *, bold: bool = False, italic: bool = False
+) -> None:
     """
     Emit `text` into `paragraph`, honouring markdown inline markup.
 
@@ -190,7 +194,11 @@ def render(doc: Document, lines: list[str]) -> None:
 
         # Horizontal rule — Word has no <hr>; an empty bottom-bordered
         # paragraph is the idiomatic equivalent and stays editable.
-        if set(stripped) <= {"-", "*"} and len(stripped) >= 3 and not is_table_row(stripped):
+        if (
+            set(stripped) <= {"-", "*"}
+            and len(stripped) >= 3
+            and not is_table_row(stripped)
+        ):
             _horizontal_rule(doc)
             i += 1
             continue
@@ -204,7 +212,9 @@ def render(doc: Document, lines: list[str]) -> None:
 
         if stripped.startswith(">"):
             block, i = _gather(lines, i, lambda ln: ln.strip().startswith(">"))
-            text = " ".join(ln.strip().lstrip(">").strip() for ln in block if ln.strip() != ">")
+            text = " ".join(
+                ln.strip().lstrip(">").strip() for ln in block if ln.strip() != ">"
+            )
             for chunk in text.split("  "):
                 if chunk.strip():
                     write_inline(doc.add_paragraph(style="Quote"), chunk.strip())
@@ -217,21 +227,27 @@ def render(doc: Document, lines: list[str]) -> None:
             continue
 
         if re.match(r"^[-*]\s+", stripped):
-            block, i = _gather(lines, i, lambda ln: bool(ln.strip()) and not ln.startswith("#"))
+            block, i = _gather(
+                lines, i, lambda ln: bool(ln.strip()) and not ln.startswith("#")
+            )
             for item in _list_items(block, r"^[-*]\s+"):
                 write_inline(doc.add_paragraph(style="List Bullet"), item)
             continue
 
         if re.match(r"^\d+\.\s+", stripped):
-            block, i = _gather(lines, i, lambda ln: bool(ln.strip()) and not ln.startswith("#"))
+            block, i = _gather(
+                lines, i, lambda ln: bool(ln.strip()) and not ln.startswith("#")
+            )
             for item in _list_items(block, r"^\d+\.\s+"):
                 write_inline(doc.add_paragraph(style="List Number"), item)
             continue
 
         # Ordinary paragraph: markdown soft-wraps, so join until a blank line.
         block, i = _gather(
-            lines, i,
-            lambda ln: bool(ln.strip()) and not ln.strip().startswith(("#", ">", "|", "---")),
+            lines,
+            i,
+            lambda ln: bool(ln.strip())
+            and not ln.strip().startswith(("#", ">", "|", "---")),
         )
         text = " ".join(ln.strip() for ln in block)
         for chunk in text.split("<br>"):
@@ -315,7 +331,9 @@ def _shade(cell, hex_colour: str) -> None:
 def main() -> None:
     doc = build_document()
     render(doc, SOURCE.read_text(encoding="utf-8").split("\n"))
-    doc.core_properties.title = "KVStream — A Concurrency Gateway for Microsoft Foundry Local"
+    doc.core_properties.title = (
+        "KVStream — A Concurrency Gateway for Microsoft Foundry Local"
+    )
     doc.core_properties.subject = "Technical Proposal, Revision 2"
     doc.core_properties.author = "Shreyan Fernandes"
     doc.save(OUT)

@@ -39,7 +39,9 @@ async def geometry_app():
         admission={"mode": "tokens", "budget_tokens": 1_000_000},
         models={"small-model": SMALL, "large-model": LARGE},
     )
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, gw, stub
 
 
@@ -49,20 +51,28 @@ async def geometry_app():
 @pytest.mark.asyncio
 async def test_a_heavier_model_costs_more_for_the_same_tokens(geometry_app):
     _, gw, _ = geometry_app
-    small = ChatCompletionRequest(model="small-model", messages=MESSAGES, max_tokens=100)
-    large = ChatCompletionRequest(model="large-model", messages=MESSAGES, max_tokens=100)
+    small = ChatCompletionRequest(
+        model="small-model", messages=MESSAGES, max_tokens=100
+    )
+    large = ChatCompletionRequest(
+        model="large-model", messages=MESSAGES, max_tokens=100
+    )
 
     _, small_cost = gw._cost(small)
     _, large_cost = gw._cost(large)
-    assert large_cost == small_cost * 16      # 4x layers x 4x kv heads
+    assert large_cost == small_cost * 16  # 4x layers x 4x kv heads
 
 
 @pytest.mark.asyncio
 async def test_an_undeclared_model_is_costed_as_before(geometry_app):
     """No geometry means no opinion, not a guess."""
     _, gw, _ = geometry_app
-    known = ChatCompletionRequest(model="small-model", messages=MESSAGES, max_tokens=100)
-    unknown = ChatCompletionRequest(model="mystery-model", messages=MESSAGES, max_tokens=100)
+    known = ChatCompletionRequest(
+        model="small-model", messages=MESSAGES, max_tokens=100
+    )
+    unknown = ChatCompletionRequest(
+        model="mystery-model", messages=MESSAGES, max_tokens=100
+    )
     assert gw._cost(unknown)[1] == gw._cost(known)[1]
 
 
@@ -96,7 +106,7 @@ async def test_a_heavy_model_actually_consumes_more_budget(geometry_app):
         json={"model": "large-model", "messages": MESSAGES, "max_tokens": 100},
     )
     assert r.status_code == 200
-    assert gw.capacity.reclaimed > 0      # reclaimed in the weighted unit
+    assert gw.capacity.reclaimed > 0  # reclaimed in the weighted unit
     assert gw.capacity.in_flight == 0
 
 
@@ -145,9 +155,9 @@ async def test_drain_turns_away_the_queue_and_waits_for_the_rest():
     await asyncio.sleep(0.05)
 
     assert gw.capacity.draining is True
-    assert gw.capacity.waiting == 0          # the queued one was turned away
-    assert gw.capacity.in_flight == 1        # the running one was left alone
-    assert not drain.done()                  # ...and drain is waiting for it
+    assert gw.capacity.waiting == 0  # the queued one was turned away
+    assert gw.capacity.in_flight == 1  # the running one was left alone
+    assert not drain.done()  # ...and drain is waiting for it
 
     await gw.capacity.release("occupier")
     await asyncio.wait_for(drain, timeout=2.0)
@@ -163,13 +173,15 @@ async def test_drain_gives_up_after_the_timeout():
     await gw.capacity.admit("stuck", 1)
 
     await asyncio.wait_for(gw.drain(timeout=0.1), timeout=2.0)
-    assert gw.capacity.in_flight == 1        # still there; we exited anyway
+    assert gw.capacity.in_flight == 1  # still there; we exited anyway
 
 
 @pytest.mark.asyncio
 async def test_a_draining_gateway_rejects_new_work():
     app, gw, _ = _app()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         await gw.capacity.start_draining()
         r = await c.post(
             "/v1/chat/completions", json={"model": "stub-model", "messages": MESSAGES}

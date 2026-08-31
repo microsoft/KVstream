@@ -26,7 +26,11 @@ from kvstream.backend.foundry import FoundryError
 from kvstream.backend.foundry_cli import GEN_ABSENT, FoundryCli, start_command_hint
 from kvstream.config import Settings
 
-CHAT = {"model": "stub-model", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}
+CHAT = {
+    "model": "stub-model",
+    "messages": [{"role": "user", "content": "hi"}],
+    "max_tokens": 8,
+}
 
 
 class StalledBackend:
@@ -55,7 +59,7 @@ class StalledBackend:
         yield  # pragma: no cover
 
     async def health(self) -> bool:
-        return True                      # /v1/models keeps answering
+        return True  # /v1/models keeps answering
 
     async def list_models(self):
         return ["stub-model"]
@@ -89,7 +93,9 @@ def _app(backend, **admission):
 async def stalled():
     backend = StalledBackend()
     app, gw = _app(backend)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, gw, backend
 
 
@@ -102,7 +108,7 @@ async def test_health_is_503_when_the_backend_cannot_generate(stalled):
     r = await c.get("/health")
     body = r.json()
     assert r.status_code == 503
-    assert body["backend_reachable"] is True     # exactly what misled us
+    assert body["backend_reachable"] is True  # exactly what misled us
     assert body["backend_serving"] is False
     assert "not serving" in body["hint"]
 
@@ -123,7 +129,7 @@ async def test_status_separates_reachable_from_serving(stalled):
 async def test_the_breaker_opens_and_then_fails_fast(stalled):
     c, gw, backend = stalled
 
-    for _ in range(3):                            # threshold
+    for _ in range(3):  # threshold
         assert (await c.post("/v1/chat/completions", json=CHAT)).status_code == 502
     assert gw.health.breaker.state == "open"
     attempts_at_trip = backend.attempts
@@ -148,7 +154,9 @@ async def test_failing_fast_is_fast():
     """
     backend = StalledBackend(hang=0.4)
     app, gw = _app(backend, failures=2)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(2):
             await c.post("/v1/chat/completions", json=CHAT)
         assert gw.health.breaker.state == "open"
@@ -158,7 +166,7 @@ async def test_failing_fast_is_fast():
         elapsed = asyncio.get_event_loop().time() - started
 
     assert r.status_code == 503
-    assert elapsed < 0.2          # nowhere near the 0.4s the backend would take
+    assert elapsed < 0.2  # nowhere near the 0.4s the backend would take
 
 
 @pytest.mark.asyncio
@@ -166,7 +174,9 @@ async def test_a_rejected_request_never_occupies_the_budget():
     """A dead backend must not be able to fill the admission queue."""
     backend = StalledBackend()
     app, gw = _app(backend, failures=2)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(6):
             await c.post("/v1/chat/completions", json=CHAT)
     assert gw.capacity.in_flight == 0
@@ -178,12 +188,14 @@ async def test_a_rejected_request_never_occupies_the_budget():
 async def test_the_breaker_recovers_when_the_backend_does():
     backend = StalledBackend()
     app, gw = _app(backend, failures=2, reset=0.0)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(2):
             await c.post("/v1/chat/completions", json=CHAT)
         assert gw.health.breaker.state == "open"
 
-        gw.backend = StubBackend()                # the runtime was restarted
+        gw.backend = StubBackend()  # the runtime was restarted
         r = await c.post("/v1/chat/completions", json=CHAT)
 
     assert r.status_code == 200
@@ -194,7 +206,9 @@ async def test_the_breaker_recovers_when_the_backend_does():
 async def test_client_errors_never_trip_the_breaker():
     """One malformed client must not be able to take the gateway down."""
     app, gw = _app(StubBackend(), failures=2)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(6):
             r = await c.post("/v1/chat/completions", json={"model": "m"})  # no messages
             assert r.status_code == 400
@@ -207,7 +221,9 @@ async def test_client_errors_never_trip_the_breaker():
 @pytest.mark.asyncio
 async def test_drift_is_reported_in_status_and_metrics():
     app, gw = _app(StubBackend())
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         await c.post("/v1/chat/completions", json=CHAT)
         status = (await c.get("/status")).json()
         metrics = (await c.get("/metrics")).text
@@ -222,7 +238,9 @@ async def test_drift_is_reported_in_status_and_metrics():
 async def test_drift_stays_unknown_without_a_calibration_baseline():
     """A configured budget was never measured, so there is nothing to drift from."""
     app, gw = _app(StubBackend())
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(30):
             await c.post("/v1/chat/completions", json=CHAT)
         status = (await c.get("/status")).json()
@@ -235,7 +253,9 @@ async def test_a_slow_backend_against_a_baseline_reads_degraded():
     app, gw = _app(StubBackend())
     # A baseline far faster than anything real, so live traffic must exceed it.
     gw.drift = type(gw.drift)(1e-7, warn_ratio=2.0, min_samples=3)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(10):
             await c.post("/v1/chat/completions", json=CHAT)
         status = (await c.get("/status")).json()
@@ -276,7 +296,9 @@ async def test_overload_is_refused_on_arrival_not_after_the_timeout():
     gw = app.state.gateway
     gw.backend = backend
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         # Teach the manager how fast this backend actually drains.
         for _ in range(4):
             await c.post("/v1/chat/completions", json=CHAT)
@@ -310,7 +332,9 @@ async def test_a_short_queue_is_not_refused():
     gw = app.state.gateway
     gw.backend = backend
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         for _ in range(4):
             await c.post("/v1/chat/completions", json=CHAT)
         results = await asyncio.gather(

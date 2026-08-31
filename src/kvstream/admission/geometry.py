@@ -43,11 +43,20 @@ logger = logging.getLogger("kvstream.geometry")
 
 # Bytes per element for the dtypes a local runtime realistically uses.
 DTYPE_BYTES = {
-    "float32": 4, "fp32": 4, "f32": 4,
-    "float16": 2, "fp16": 2, "f16": 2, "half": 2,
-    "bfloat16": 2, "bf16": 2,
-    "int8": 1, "i8": 1, "q8": 1,
-    "int4": 1, "q4": 1,  # 4-bit weights still typically keep an 8-bit KV cache
+    "float32": 4,
+    "fp32": 4,
+    "f32": 4,
+    "float16": 2,
+    "fp16": 2,
+    "f16": 2,
+    "half": 2,
+    "bfloat16": 2,
+    "bf16": 2,
+    "int8": 1,
+    "i8": 1,
+    "q8": 1,
+    "int4": 1,
+    "q4": 1,  # 4-bit weights still typically keep an 8-bit KV cache
 }
 DEFAULT_DTYPE = "float16"
 
@@ -174,7 +183,9 @@ class GeometryRegistry:
         self._geometry[model] = geometry
         logger.info(
             "model %r KV geometry: %d bytes/token (%s)",
-            model, geometry.kv_bytes_per_token, geometry.source,
+            model,
+            geometry.kv_bytes_per_token,
+            geometry.source,
         )
 
     def load_config(self, declared: dict[str, dict]) -> None:
@@ -218,7 +229,10 @@ class GeometryRegistry:
             "anchor": self._anchor,
             "anchor_known": self._anchor in self._geometry,
             "models": {
-                model: {**geometry.as_dict(), "weight": round(self.weight_for(model), 4)}
+                model: {
+                    **geometry.as_dict(),
+                    "weight": round(self.weight_for(model), 4),
+                }
                 for model, geometry in sorted(self._geometry.items())
             },
         }

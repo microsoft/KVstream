@@ -61,7 +61,12 @@ from kvstream.models import (
     backend_payload,
 )
 from kvstream.observability import Metrics
-from kvstream.tokenization import TokenEstimator, count_units, message_chars, message_units
+from kvstream.tokenization import (
+    TokenEstimator,
+    count_units,
+    message_chars,
+    message_units,
+)
 from kvstream.version import __version__
 
 logger = logging.getLogger("kvstream.app")
@@ -77,7 +82,12 @@ _CIRCUIT_STATES = {"closed": 0, "half_open": 1, "open": 2}
 # Environment variables an operator might use to fan the app across processes.
 # Admission state lives in this process, so more than one worker means more than
 # one budget — see `_guard_single_process`.
-_WORKER_ENV_VARS = ("WEB_CONCURRENCY", "UVICORN_WORKERS", "GUNICORN_WORKERS", "KVSTREAM_WORKERS")
+_WORKER_ENV_VARS = (
+    "WEB_CONCURRENCY",
+    "UVICORN_WORKERS",
+    "GUNICORN_WORKERS",
+    "KVSTREAM_WORKERS",
+)
 
 
 def _guard_single_process() -> None:
@@ -190,9 +200,12 @@ class Gateway:
         self.backend_healthy = False
         logger.info(
             "admission: %s budget=%d (%s) reserve_ratio=%.2f | cache=%s | coalesce=%s",
-            self.capacity.unit, self.capacity.budget,
-            self.budget_provenance.get("source"), self.capacity.reserve_ratio,
-            self.cache is not None, self.coalescer is not None,
+            self.capacity.unit,
+            self.capacity.budget,
+            self.budget_provenance.get("source"),
+            self.capacity.reserve_ratio,
+            self.cache is not None,
+            self.coalescer is not None,
         )
         if self.capacity.reserve_ratio < 1.0:
             logger.warning(
@@ -244,7 +257,9 @@ class Gateway:
             if (budget, unit) != (self.capacity.budget, self.capacity.unit):
                 logger.info(
                     "re-resolved admission budget after CLI detection: %s %d (%s)",
-                    unit, budget, provenance.get("source"),
+                    unit,
+                    budget,
+                    provenance.get("source"),
                 )
                 self.capacity, self.budget_provenance = build_capacity_manager(
                     self.settings.admission, key
@@ -260,7 +275,8 @@ class Gateway:
         if not self.backend_healthy:
             logger.warning(
                 "Foundry Local is not reachable at %s. %s",
-                self.backend.base_url, self.backend.unreachable_hint(),
+                self.backend.base_url,
+                self.backend.unreachable_hint(),
             )
         await self._warn_if_model_unknown(cli)
         await self._learn_geometry(cli)
@@ -318,7 +334,9 @@ class Gateway:
         prompt_tokens = self.estimator.estimate_messages(req.messages)
         rc = RequestCost(
             prompt_tokens=prompt_tokens,
-            max_tokens=req.generation_budget(self.settings.admission.default_max_tokens),
+            max_tokens=req.generation_budget(
+                self.settings.admission.default_max_tokens
+            ),
             kv_weight=self.geometry.weight_for(req.model),
         )
         return rc, self.capacity.cost_of(rc)
@@ -344,7 +362,9 @@ class Gateway:
             actual_completion = usage.get("completion_tokens")
             if isinstance(actual_prompt, int) and actual_prompt > 0:
                 self.estimator.observe(
-                    message_chars(req.messages), message_units(req.messages), actual_prompt
+                    message_chars(req.messages),
+                    message_units(req.messages),
+                    actual_prompt,
                 )
                 prompt_tokens = actual_prompt
             if isinstance(actual_completion, int) and actual_completion >= 0:
@@ -404,13 +424,17 @@ class Gateway:
         except AdmissionTimeout as exc:
             self.metrics.rejected.labels(route, "timeout").inc()
             self.metrics.requests.labels(route, "rejected").inc()
-            raise HTTPException(status_code=503, detail="server overloaded (timeout)") from exc
+            raise HTTPException(
+                status_code=503, detail="server overloaded (timeout)"
+            ) from exc
 
     def _record_backend_failure(self, phase: str, error: object) -> None:
         """One backend failure: count it, and let the breaker decide."""
         self.metrics.backend_errors.labels(phase).inc()
         self.health.record_failure(str(error))
-        self.metrics.circuit_state.set(_CIRCUIT_STATES.get(self.health.breaker.state, 0))
+        self.metrics.circuit_state.set(
+            _CIRCUIT_STATES.get(self.health.breaker.state, 0)
+        )
 
     def _record_backend_success(self, latency_seconds: float, tokens: int) -> None:
         """One healthy round trip: reset the breaker and feed drift detection."""
@@ -420,7 +444,9 @@ class Gateway:
         if self.drift.ratio:
             self.metrics.drift_ratio.set(self.drift.ratio)
 
-    async def _account(self, req_id: str, rc: RequestCost, generated_tokens: int) -> None:
+    async def _account(
+        self, req_id: str, rc: RequestCost, generated_tokens: int
+    ) -> None:
         """
         Update a live reservation to what the request actually occupies.
 
@@ -657,7 +683,9 @@ class Gateway:
                 await self._account(req_id, rc, completion_tokens)
                 await self.capacity.release(req_id)
                 if key and finish and failure is None:
-                    self._store_stream(key, recorded, rc.prompt_tokens, completion_tokens, finish)
+                    self._store_stream(
+                        key, recorded, rc.prompt_tokens, completion_tokens, finish
+                    )
                 if broadcast is not None and self.stream_coalescer:
                     broadcast.publish(b"data: [DONE]\n\n")
                     broadcast.close()
@@ -698,7 +726,9 @@ class Gateway:
         size = _approx_size(result)
         if size > self.settings.cache.max_entry_bytes:
             self.metrics.cache_skipped.labels("too_large").inc()
-            logger.debug("not caching %s: %d bytes exceeds max_entry_bytes", key[:12], size)
+            logger.debug(
+                "not caching %s: %d bytes exceeds max_entry_bytes", key[:12], size
+            )
             return
         self.cache.put(key, result)
 
@@ -718,7 +748,9 @@ class Gateway:
         prompt_tokens = sum(self.estimator.estimate_text(t) for t in req.texts)
         rc = RequestCost(
             prompt_tokens=max(1, prompt_tokens),
-            max_tokens=req.generation_budget(self.settings.admission.default_max_tokens),
+            max_tokens=req.generation_budget(
+                self.settings.admission.default_max_tokens
+            ),
         )
 
         await self._admit(req_id, self.capacity.cost_of(rc), ROUTE_COMPLETIONS)
@@ -894,7 +926,8 @@ class Gateway:
             if time.monotonic() >= deadline:
                 logger.warning(
                     "shutdown: %d request(s) still in flight after %.0fs; exiting anyway",
-                    self.capacity.stats()["active"] + self.audio_capacity.stats()["active"],
+                    self.capacity.stats()["active"]
+                    + self.audio_capacity.stats()["active"],
                     timeout,
                 )
                 break
@@ -968,8 +1001,11 @@ def _client_chunk(tok: Token, req: ChatCompletionRequest, req_id: str) -> dict |
             "created": int(time.time()),
             "model": req.model,
             "choices": [
-                {"index": 0, "delta": {"content": tok.text},
-                 "finish_reason": tok.finish_reason}
+                {
+                    "index": 0,
+                    "delta": {"content": tok.text},
+                    "finish_reason": tok.finish_reason,
+                }
             ],
         }
     if tok.usage is not None and not req.wants_usage:
@@ -1036,7 +1072,10 @@ def _runtime_profile(provenance: dict) -> dict:
     profile = record.get("runtime_profile") if isinstance(record, dict) else None
     if isinstance(profile, dict):
         return profile
-    return {"regime": "unknown", "detail": "no calibration record; run `kvstream calibrate`"}
+    return {
+        "regime": "unknown",
+        "detail": "no calibration record; run `kvstream calibrate`",
+    }
 
 
 def _approx_size(result: CachedResponse) -> int:
@@ -1097,13 +1136,17 @@ def _error_body(status_code: int, message: str, code: str | None = None) -> dict
     }
 
 
-def _error_response(status_code: int, message: str, code: str | None = None) -> JSONResponse:
+def _error_response(
+    status_code: int, message: str, code: str | None = None
+) -> JSONResponse:
     headers = {}
     if status_code == 503:
         # Backpressure is only useful if the client can act on it.
         headers["Retry-After"] = "1"
     return JSONResponse(
-        status_code=status_code, content=_error_body(status_code, message, code), headers=headers
+        status_code=status_code,
+        content=_error_body(status_code, message, code),
+        headers=headers,
     )
 
 
@@ -1155,7 +1198,9 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         return _error_response(exc.status_code, str(exc.detail))
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    async def _validation_error(
+        _: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         first = exc.errors()[0] if exc.errors() else {}
         loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
         message = first.get("msg", "invalid request")
@@ -1244,7 +1289,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
                         gw.stream_coalescer.stats() if gw.stream_coalescer else None
                     ),
                 }
-                if gw.coalescer else {"enabled": False}
+                if gw.coalescer
+                else {"enabled": False}
             ),
             "model_geometry": gw.geometry.stats(),
         }
@@ -1284,9 +1330,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             gw.audio_capacity.stats(),
             gw.calibration_age(),
         )
-        gw.metrics.circuit_state.set(
-            _CIRCUIT_STATES.get(gw.health.breaker.state, 0)
-        )
+        gw.metrics.circuit_state.set(_CIRCUIT_STATES.get(gw.health.breaker.state, 0))
         gw.metrics.backend_ready.set(1 if gw.health.readiness.ready else 0)
         if gw.drift.ratio:
             gw.metrics.drift_ratio.set(gw.drift.ratio)
@@ -1319,11 +1363,15 @@ def build_app(settings: Settings | None = None) -> FastAPI:
                         media_type="text/event-stream",
                         headers={"X-Request-Id": req_id},
                     )
-                return JSONResponse(hit.body or {}, headers=_result_headers(req_id, hit))
+                return JSONResponse(
+                    hit.body or {}, headers=_result_headers(req_id, hit)
+                )
 
         write_key = key if directive.write else None
         if req.stream:
-            return await gw.handle_streaming(req_id, req, raw, rc, cost, write_key, auth)
+            return await gw.handle_streaming(
+                req_id, req, raw, rc, cost, write_key, auth
+            )
         return await gw.handle_nonstreaming(req_id, req, raw, rc, cost, write_key, auth)
 
     # Proposal §8.4: a gateway that admits only chat leaves the other paths
@@ -1344,6 +1392,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
         @app.post("/v1/completions")
         async def completions(req: CompletionRequest, request: Request):
-            return await gw.handle_completions(req, await request.json(), _auth(request))
+            return await gw.handle_completions(
+                req, await request.json(), _auth(request)
+            )
 
     return app

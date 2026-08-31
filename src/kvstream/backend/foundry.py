@@ -134,8 +134,8 @@ class FoundryClient:
 
         self._cooldown = max(0.0, discovery_cooldown)
         self._last_scan_at: float | None = None
-        self.scans = 0            # full localhost sweeps performed
-        self.resolutions = 0      # times a new backend URL was adopted
+        self.scans = 0  # full localhost sweeps performed
+        self.resolutions = 0  # times a new backend URL was adopted
 
         # None = untested, True = supported, False = rejected once, stop sending.
         self._use_stream_options: bool | None = True if request_usage else False
@@ -189,7 +189,9 @@ class FoundryClient:
             "scans": self.scans,
             "resolutions": self.resolutions,
             "usage_reporting": self._use_stream_options,
-            "resolution": self.last_resolution.as_dict() if self.last_resolution else None,
+            "resolution": (
+                self.last_resolution.as_dict() if self.last_resolution else None
+            ),
             "foundry_cli": self.cli.as_dict(),
         }
 
@@ -220,16 +222,21 @@ class FoundryClient:
 
         async with self._lock:
             # Another coroutine may have re-resolved while we waited.
-            if self._resolved_url and await discovery.probe_url(
-                self._client, self._resolved_url
-            ) is not None:
+            if (
+                self._resolved_url
+                and await discovery.probe_url(self._client, self._resolved_url)
+                is not None
+            ):
                 return self._resolved_url
 
             # Cooldown: resolution spawns subprocesses and probes every
             # listening port. When the backend is simply down, that must not
             # happen once per inbound request.
             now = asyncio.get_event_loop().time()
-            if self._last_scan_at is not None and (now - self._last_scan_at) < self._cooldown:
+            if (
+                self._last_scan_at is not None
+                and (now - self._last_scan_at) < self._cooldown
+            ):
                 logger.debug(
                     "resolution on cooldown (%.1fs remaining); using last known URL",
                     self._cooldown - (now - self._last_scan_at),
@@ -299,7 +306,10 @@ class FoundryClient:
         self, url: str, body: dict, headers: dict[str, str] | None = None
     ) -> AsyncGenerator[Token, None]:
         async with self._client.stream(
-            "POST", f"{url}/v1/chat/completions", json=body, headers=self._headers(headers)
+            "POST",
+            f"{url}/v1/chat/completions",
+            json=body,
+            headers=self._headers(headers),
         ) as resp:
             if resp.status_code >= 400:
                 detail = (await resp.aread()).decode(errors="replace")
@@ -462,7 +472,9 @@ class FoundryClient:
         url = await self.resolve_url()
         try:
             resp = await self._client.get(
-                f"{url}/v1/models/{model_id}", timeout=5.0, headers=self._headers(headers)
+                f"{url}/v1/models/{model_id}",
+                timeout=5.0,
+                headers=self._headers(headers),
             )
         except httpx.HTTPError as exc:
             raise self.unreachable(url, exc) from exc
@@ -470,8 +482,10 @@ class FoundryClient:
             return resp.status_code, resp.json()
         except ValueError:
             return resp.status_code, {
-                "error": {"message": "Foundry Local returned a non-JSON body",
-                          "type": "upstream_error"}
+                "error": {
+                    "message": "Foundry Local returned a non-JSON body",
+                    "type": "upstream_error",
+                }
             }
 
     async def health(self) -> bool:

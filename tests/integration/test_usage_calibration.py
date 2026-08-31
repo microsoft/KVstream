@@ -16,8 +16,8 @@ from kvstream.app import build_app
 from kvstream.backend.foundry import Token
 from kvstream.config import Settings
 
-PROMPT = "a" * 3000          # 3,000 characters
-REAL_PROMPT_TOKENS = 1000    # => a true ratio of 3.0 chars/token
+PROMPT = "a" * 3000  # 3,000 characters
+REAL_PROMPT_TOKENS = 1000  # => a true ratio of 3.0 chars/token
 REAL_COMPLETION_TOKENS = 7
 
 
@@ -89,7 +89,9 @@ async def client():
     settings.backend.model = "stub-model"
     app = build_app(settings)
     app.state.gateway.backend = UsageStubBackend()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, app.state.gateway
 
 
@@ -124,7 +126,9 @@ async def test_nonstreaming_reports_real_usage_and_calibrates(client):
 async def test_streaming_path_also_calibrates(client):
     """Regression: the trailing usage chunk must not be dropped when streaming."""
     c, gw = client
-    async with c.stream("POST", "/v1/chat/completions", json=_payload(stream=True)) as resp:
+    async with c.stream(
+        "POST", "/v1/chat/completions", json=_payload(stream=True)
+    ) as resp:
         assert resp.status_code == 200
         async for _ in resp.aiter_lines():
             pass

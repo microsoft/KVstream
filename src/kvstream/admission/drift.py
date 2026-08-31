@@ -26,7 +26,7 @@ import logging
 
 logger = logging.getLogger("kvstream.drift")
 
-UNKNOWN = "unknown"      # no baseline, or not enough traffic yet
+UNKNOWN = "unknown"  # no baseline, or not enough traffic yet
 OK = "ok"
 DEGRADED = "degraded"
 
@@ -80,7 +80,8 @@ class DriftMonitor:
             return
         per_token = latency_seconds / tokens
         self._ewma = (
-            per_token if self._samples == 0
+            per_token
+            if self._samples == 0
             else (1 - self._alpha) * self._ewma + self._alpha * per_token
         )
         self._samples += 1
@@ -100,10 +101,14 @@ class DriftMonitor:
                 "(%.5fs vs %.5fs). The admission budget was measured on a backend that "
                 "no longer behaves this way — re-run `kvstream calibrate`, and check "
                 "whether the runtime needs restarting.",
-                ratio, self._ewma, self._baseline,
+                ratio,
+                self._ewma,
+                self._baseline,
             )
         elif self._state == OK and previous == DEGRADED:
-            logger.info("backend drift cleared: %.1fx of the calibration baseline", ratio)
+            logger.info(
+                "backend drift cleared: %.1fx of the calibration baseline", ratio
+            )
 
     def stats(self) -> dict:
         return {

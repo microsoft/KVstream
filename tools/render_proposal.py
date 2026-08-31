@@ -178,7 +178,7 @@ FONTS = (
     '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
     "family=IBM+Plex+Mono:wght@400;500&"
     "family=Source+Sans+3:wght@400;600&"
-    "family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap\">"
+    'family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">'
 )
 
 
@@ -208,9 +208,9 @@ def main() -> None:
             display_header_footer=True,
             header_template="<div></div>",
             footer_template=(
-                "<div style=\"width:100%;font-size:7pt;color:#6b7278;"
+                '<div style="width:100%;font-size:7pt;color:#6b7278;'
                 "font-family:'Segoe UI',Helvetica,sans-serif;padding:0 18mm;"
-                "display:flex;justify-content:space-between;\">"
+                'display:flex;justify-content:space-between;">'
                 "<span>KVStream — Technical Proposal, Revision 2</span>"
                 "<span class='pageNumber'></span></div>"
             ),

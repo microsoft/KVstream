@@ -58,7 +58,7 @@ def test_grouped_query_attention_uses_kv_heads_not_attention_heads():
     g = from_config(GQA)
     assert g is not None
     assert g.kv_heads == 8
-    assert g.head_dim == 3072 // 32       # derived from hidden_size / heads
+    assert g.head_dim == 3072 // 32  # derived from hidden_size / heads
 
 
 def test_head_dim_is_derived_when_absent():
@@ -97,7 +97,9 @@ def test_the_anchor_always_weighs_one():
 def test_an_unknown_model_is_costed_exactly_as_before():
     """No geometry means no opinion — never a penalty or a discount."""
     r = GeometryRegistry("phi-3-mini")
-    r.declare("phi-3-mini", ModelGeometry(**{"layers": 32, "kv_heads": 32, "head_dim": 96}))
+    r.declare(
+        "phi-3-mini", ModelGeometry(**{"layers": 32, "kv_heads": 32, "head_dim": 96})
+    )
     assert r.weight_for("some-other-model") == 1.0
 
 

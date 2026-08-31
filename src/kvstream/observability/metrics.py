@@ -8,7 +8,13 @@ queueing, cache, coalescing, latency).
 
 from __future__ import annotations
 
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 
 class Metrics:
@@ -39,7 +45,8 @@ class Metrics:
             registry=self.registry,
         )
         self.coalesced = Counter(
-            "kvstream_coalesced_total", "Requests served by a coalesced leader.",
+            "kvstream_coalesced_total",
+            "Requests served by a coalesced leader.",
             registry=self.registry,
         )
         self.latency = Histogram(
@@ -73,16 +80,22 @@ class Metrics:
         )
 
         self.budget = Gauge(
-            "kvstream_budget", "Admission budget (tokens or slots).", registry=self.registry
+            "kvstream_budget",
+            "Admission budget (tokens or slots).",
+            registry=self.registry,
         )
         self.in_flight = Gauge(
-            "kvstream_in_flight", "Reserved budget currently in flight.", registry=self.registry
+            "kvstream_in_flight",
+            "Reserved budget currently in flight.",
+            registry=self.registry,
         )
         self.utilization = Gauge(
             "kvstream_budget_utilization", "in_flight / budget.", registry=self.registry
         )
         self.queue_depth = Gauge(
-            "kvstream_queue_depth", "Requests waiting for admission.", registry=self.registry
+            "kvstream_queue_depth",
+            "Requests waiting for admission.",
+            registry=self.registry,
         )
         self.chars_per_token = Gauge(
             "kvstream_chars_per_token",

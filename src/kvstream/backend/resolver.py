@@ -99,7 +99,9 @@ class BackendResolver:
         if self.cli.available:
             logger.info(
                 "detected Foundry Local CLI %s (%s generation) at %s",
-                self.cli.version or "unknown", self.cli.generation, self.cli.path,
+                self.cli.version or "unknown",
+                self.cli.generation,
+                self.cli.path,
             )
         return self.cli
 
@@ -137,7 +139,8 @@ class BackendResolver:
                 # is exactly the case the scan exists to rescue.
                 logger.info(
                     "`%s` reported %s but no candidate answered /v1/models; falling back to scan",
-                    endpoint.command, endpoint.url,
+                    endpoint.command,
+                    endpoint.url,
                 )
                 attempts.append("foundry-cli-endpoint-dead")
         elif self.use_cli:
@@ -149,10 +152,14 @@ class BackendResolver:
             client, self.configured_url, self.exclude_ports, prefer_model=self.model
         )
         if found:
-            return Resolution(found, SOURCE_SCAN, detail="localhost scan", attempts=attempts)
+            return Resolution(
+                found, SOURCE_SCAN, detail="localhost scan", attempts=attempts
+            )
 
         # 4. Failure, with a command the operator can actually run.
-        return Resolution(None, SOURCE_NONE, detail=self.failure_hint(), attempts=attempts)
+        return Resolution(
+            None, SOURCE_NONE, detail=self.failure_hint(), attempts=attempts
+        )
 
     def failure_hint(self) -> str:
         """An actionable message for the CLI generation actually detected."""

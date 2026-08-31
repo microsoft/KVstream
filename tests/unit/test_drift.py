@@ -10,7 +10,13 @@ watching.
 
 from __future__ import annotations
 
-from kvstream.admission.drift import DEGRADED, OK, UNKNOWN, DriftMonitor, baseline_from_provenance
+from kvstream.admission.drift import (
+    DEGRADED,
+    OK,
+    UNKNOWN,
+    DriftMonitor,
+    baseline_from_provenance,
+)
 
 
 def _monitor(baseline: float = 0.001, **kwargs) -> DriftMonitor:
@@ -38,7 +44,7 @@ def test_it_waits_for_enough_traffic():
 def test_a_healthy_backend_reads_ok():
     m = _monitor(baseline=0.01)
     for _ in range(20):
-        m.observe(1.0, 100)          # 0.01 s/token — exactly the baseline
+        m.observe(1.0, 100)  # 0.01 s/token — exactly the baseline
     assert m.state == OK
     assert 0.9 < m.ratio < 1.1
 
@@ -46,7 +52,7 @@ def test_a_healthy_backend_reads_ok():
 def test_a_degrading_backend_is_flagged():
     m = _monitor(baseline=0.01)
     for _ in range(40):
-        m.observe(5.0, 100)          # 0.05 s/token — five times slower
+        m.observe(5.0, 100)  # 0.05 s/token — five times slower
     assert m.state == DEGRADED
     assert m.ratio > 3.0
 
@@ -81,9 +87,9 @@ def test_request_size_does_not_read_as_drift():
     """
     m = _monitor(baseline=0.01)
     for _ in range(10):
-        m.observe(1.0, 100)          # small requests
+        m.observe(1.0, 100)  # small requests
     for _ in range(10):
-        m.observe(20.0, 2000)        # large requests, same rate per token
+        m.observe(20.0, 2000)  # large requests, same rate per token
     assert m.state == OK
 
 
@@ -140,6 +146,8 @@ def test_a_configured_budget_has_no_baseline():
 def test_a_v1_record_without_per_token_data_has_no_baseline():
     """Old sweeps predate the normalised signal; they cannot supply one."""
     provenance = {
-        "lookup": {"record": {"sweep": [{"concurrency": 1, "p99_seconds": 0.4, "errors": 0}]}}
+        "lookup": {
+            "record": {"sweep": [{"concurrency": 1, "p99_seconds": 0.4, "errors": 0}]}
+        }
     }
     assert baseline_from_provenance(provenance) == 0.0

@@ -25,7 +25,9 @@ async def token_mode():
     app = build_app(settings)
     stub = StubBackend()
     app.state.gateway.backend = stub
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c, app.state.gateway, stub
 
 
@@ -60,7 +62,9 @@ async def test_non_streamed_requests_are_forwarded_non_streamed(token_mode):
 @pytest.mark.asyncio
 async def test_streamed_requests_still_stream(token_mode):
     c, _, stub = token_mode
-    async with c.stream("POST", "/v1/chat/completions", json=_payload(stream=True)) as resp:
+    async with c.stream(
+        "POST", "/v1/chat/completions", json=_payload(stream=True)
+    ) as resp:
         assert resp.status_code == 200
         async for _ in resp.aiter_lines():
             pass
@@ -85,7 +89,9 @@ async def test_unused_headroom_is_reclaimed_on_the_non_streaming_path(token_mode
 @pytest.mark.asyncio
 async def test_unused_headroom_is_reclaimed_on_the_streaming_path(token_mode):
     c, gw, _ = token_mode
-    async with c.stream("POST", "/v1/chat/completions", json=_payload(stream=True)) as resp:
+    async with c.stream(
+        "POST", "/v1/chat/completions", json=_payload(stream=True)
+    ) as resp:
         async for _ in resp.aiter_lines():
             pass
     assert gw.capacity.reclaimed > 0
@@ -111,9 +117,11 @@ async def test_reclaim_is_visible_in_status_and_metrics(token_mode):
 async def test_concurrency_mode_reclaims_nothing():
     """Live accounting is a token-mode concept; slots are indivisible."""
     settings = Settings()
-    settings.backend.model = "stub-model"          # default mode: concurrency
+    settings.backend.model = "stub-model"  # default mode: concurrency
     app = build_app(settings)
     app.state.gateway.backend = StubBackend()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         await c.post("/v1/chat/completions", json=_payload(stream=False))
     assert app.state.gateway.capacity.reclaimed == 0

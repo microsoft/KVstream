@@ -64,7 +64,9 @@ class CalibrationKey:
     backend_version: str = UNKNOWN
 
     def as_str(self) -> str:
-        return "|".join((self.model, self.device, self.cli_generation, self.backend_version))
+        return "|".join(
+            (self.model, self.device, self.cli_generation, self.backend_version)
+        )
 
     def as_dict(self) -> dict:
         return {
@@ -104,7 +106,9 @@ class SweepPoint:
         return self.p99_per_token or self.p99_seconds
 
 
-def find_knee(points: list[SweepPoint], latency_ratio: float = 2.0) -> SweepPoint | None:
+def find_knee(
+    points: list[SweepPoint], latency_ratio: float = 2.0
+) -> SweepPoint | None:
     """
     Return the last healthy sweep point before the knee, or ``None`` if the very
     first point already fails.
@@ -177,7 +181,10 @@ def save_budget(
     with open(store_path, "w", encoding="utf-8") as f:
         json.dump(store, f, indent=2, sort_keys=True)
     logger.info(
-        "wrote calibrated budget B=%d for %s to %s", budget_tokens, key.as_str(), store_path
+        "wrote calibrated budget B=%d for %s to %s",
+        budget_tokens,
+        key.as_str(),
+        store_path,
     )
 
 
@@ -252,7 +259,9 @@ def lookup_budget(store_path: str, key: CalibrationKey) -> CalibrationLookup:
                 ),
             )
 
-    models = sorted({str(r.get("model")) for r in entries.values() if isinstance(r, dict)})
+    models = sorted(
+        {str(r.get("model")) for r in entries.values() if isinstance(r, dict)}
+    )
     return CalibrationLookup(
         0,
         "none",
@@ -290,8 +299,12 @@ def _probe_shapes(prompt_tokens: int, max_tokens: int) -> list[tuple[int, int]]:
 def _log_point(point: SweepPoint, prefix: str = "sweep") -> None:
     logger.info(
         "%s c=%d inflight=%d p99=%.2fs per-token=%.5fs errors=%d",
-        prefix, point.concurrency, point.inflight_tokens, point.p99_seconds,
-        point.p99_per_token, point.errors,
+        prefix,
+        point.concurrency,
+        point.inflight_tokens,
+        point.p99_seconds,
+        point.p99_per_token,
+        point.errors,
     )
 
 
@@ -440,7 +453,9 @@ class CalibrationService:
         self.profile = classify_runtime(points)
         logger.info(
             "runtime regime: %s (optimal concurrency %d) — %s",
-            self.profile.regime, self.profile.optimal_concurrency, self.profile.detail,
+            self.profile.regime,
+            self.profile.optimal_concurrency,
+            self.profile.detail,
         )
         if not self.profile.admission_raises_throughput:
             logger.warning("%s", self.profile.advice)

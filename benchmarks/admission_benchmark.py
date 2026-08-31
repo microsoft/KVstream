@@ -87,7 +87,9 @@ class Result:
             "p50_ms": round(self.pct(0.50) * 1000),
             "p95_ms": round(self.pct(0.95) * 1000),
             "p99_ms": round(self.pct(0.99) * 1000),
-            "mean_ms": round(statistics.fmean(self.latencies) * 1000) if self.latencies else 0,
+            "mean_ms": (
+                round(statistics.fmean(self.latencies) * 1000) if self.latencies else 0
+            ),
             "wall_seconds": round(self.wall_seconds, 2),
             "throughput_rps": round(self.throughput, 2),
             "success_rate": round(self.success_rate, 4),
@@ -132,7 +134,9 @@ def _workload(
     return requests
 
 
-async def _drive(url: str, requests: list[dict], concurrency: int, label: str) -> Result:
+async def _drive(
+    url: str, requests: list[dict], concurrency: int, label: str
+) -> Result:
     result = Result(label=label)
     semaphore = asyncio.Semaphore(concurrency)
     started = time.perf_counter()
@@ -143,7 +147,9 @@ async def _drive(url: str, requests: list[dict], concurrency: int, label: str) -
             async with semaphore:
                 t0 = time.perf_counter()
                 try:
-                    response = await client.post(f"{url}/v1/chat/completions", json=payload)
+                    response = await client.post(
+                        f"{url}/v1/chat/completions", json=payload
+                    )
                 except Exception:  # noqa: BLE001
                     result.errors += 1
                     return
@@ -182,7 +188,9 @@ async def _calibrate(backend_url: str, store: Path, model: str, args) -> int:
     client = FoundryClient(
         base_url=backend_url, model=model, discover=False, use_foundry_cli=False
     )
-    service = CalibrationService(client, str(store), calibration_key_for(settings.backend))
+    service = CalibrationService(
+        client, str(store), calibration_key_for(settings.backend)
+    )
     budget = await service.calibrate(
         probe_prompt_tokens=args.probe_prompt_tokens,
         probe_max_tokens=args.probe_max_tokens,
@@ -196,7 +204,11 @@ async def _calibrate(backend_url: str, store: Path, model: str, args) -> int:
 
 async def run(args: argparse.Namespace) -> dict:
     requests = _workload(
-        args.requests, args.seed, args.model, args.max_prompt_tokens, args.max_output_tokens
+        args.requests,
+        args.seed,
+        args.model,
+        args.max_prompt_tokens,
+        args.max_output_tokens,
     )
     store = Path(args.store)
 
@@ -222,7 +234,9 @@ async def _bench(args, requests, backend_url: str, model, store: Path) -> dict:
     direct = None
 
     if args.arm in ("both", "direct"):
-        direct = await _drive(backend_url, requests, args.concurrency, "direct to runtime")
+        direct = await _drive(
+            backend_url, requests, args.concurrency, "direct to runtime"
+        )
         results.append(direct)
         peak_direct = dict(model.stats()) if model else None
         if model:
@@ -248,7 +262,9 @@ async def _bench(args, requests, backend_url: str, model, store: Path) -> dict:
     settings.admission.admission_timeout_seconds = 120.0
 
     async with _serve(build_app(settings), args.gateway_port) as gateway_url:
-        through = await _drive(gateway_url, requests, args.concurrency, "through KVStream")
+        through = await _drive(
+            gateway_url, requests, args.concurrency, "through KVStream"
+        )
         async with httpx.AsyncClient(timeout=60.0) as client:
             status = (await client.get(f"{gateway_url}/status")).json()
             health = (await client.get(f"{gateway_url}/health")).json()
@@ -297,10 +313,14 @@ def _print(payload: dict) -> None:
             f"Modelled runtime    : optimal concurrency {rm['optimal_concurrency']}, "
             f"hard limit {rm['hard_limit']}"
         )
-    print(f"Load                : {payload['requests']} requests, "
-          f"{payload['client_concurrency']} concurrent, mixed sizes")
+    print(
+        f"Load                : {payload['requests']} requests, "
+        f"{payload['client_concurrency']} concurrent, mixed sizes"
+    )
     source = "measured by kvstream calibrate" if payload["calibrated"] else "configured"
-    print(f"Admission budget    : {payload['calibrated_budget_tokens']} tokens ({source})")
+    print(
+        f"Admission budget    : {payload['calibrated_budget_tokens']} tokens ({source})"
+    )
     print()
 
     header = (
@@ -308,8 +328,20 @@ def _print(payload: dict) -> None:
         f"| {'goodput':>8} |"
     )
     print(header)
-    print("|" + "-" * 22 + "|" + "-" * 7 + "|" + "-" * 6 + "|" + "-" * 7 + "|"
-          + ("-" * 11 + "|") * 2 + "-" * 10 + "|")
+    print(
+        "|"
+        + "-" * 22
+        + "|"
+        + "-" * 7
+        + "|"
+        + "-" * 6
+        + "|"
+        + "-" * 7
+        + "|"
+        + ("-" * 11 + "|") * 2
+        + "-" * 10
+        + "|"
+    )
     for row in payload["results"]:
         print(
             f"| {row['label']:<20} | {row['completed']:>5} | {row['refused_503']:>4} "
@@ -348,13 +380,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--requests", type=int, default=120)
     parser.add_argument("--concurrency", type=int, default=32)
-    parser.add_argument("--optimal", type=int, default=4, help="simulated optimal concurrency")
-    parser.add_argument("--hard-limit", type=int, default=16, help="simulated stall threshold")
-    parser.add_argument("--budget-tokens", type=int, default=0, help="0 = calibrate first")
-    parser.add_argument("--backend-url", help="measure a real backend instead of the model")
-    parser.add_argument("--model", default="sim-model", help="model id to send in each request")
     parser.add_argument(
-        "--arm", choices=("both", "direct", "gateway"), default="both",
+        "--optimal", type=int, default=4, help="simulated optimal concurrency"
+    )
+    parser.add_argument(
+        "--hard-limit", type=int, default=16, help="simulated stall threshold"
+    )
+    parser.add_argument(
+        "--budget-tokens", type=int, default=0, help="0 = calibrate first"
+    )
+    parser.add_argument(
+        "--backend-url", help="measure a real backend instead of the model"
+    )
+    parser.add_argument(
+        "--model", default="sim-model", help="model id to send in each request"
+    )
+    parser.add_argument(
+        "--arm",
+        choices=("both", "direct", "gateway"),
+        default="both",
         help="which arm(s) to run; separate runs let you alternate the order",
     )
     parser.add_argument("--max-prompt-tokens", type=int, default=4000)

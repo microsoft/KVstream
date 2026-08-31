@@ -42,7 +42,9 @@ async def test_streaming_requests_usage_by_default():
         import json
 
         seen.append(json.loads(request.content))
-        return httpx.Response(200, text=SSE_BODY, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200, text=SSE_BODY, headers={"content-type": "text/event-stream"}
+        )
 
     c = _client(handler)
     tokens = [t async for t in c.chat({"model": "m", "messages": []})]
@@ -50,7 +52,11 @@ async def test_streaming_requests_usage_by_default():
 
     assert seen[0]["stream"] is True
     assert seen[0]["stream_options"] == {"include_usage": True}
-    assert tokens[-1].usage == {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}
+    assert tokens[-1].usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 2,
+        "total_tokens": 13,
+    }
 
 
 @pytest.mark.asyncio
@@ -65,7 +71,9 @@ async def test_stream_options_rejection_falls_back_once():
         attempts.append(body)
         if "stream_options" in body:
             return httpx.Response(400, text='{"error":"unknown field stream_options"}')
-        return httpx.Response(200, text=SSE_BODY, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200, text=SSE_BODY, headers={"content-type": "text/event-stream"}
+        )
 
     c = _client(handler)
     tokens = [t async for t in c.chat({"model": "m", "messages": []})]
@@ -108,7 +116,11 @@ async def test_chat_once_forwards_non_stream_and_returns_usage():
             200,
             json={
                 "choices": [{"message": {"content": "Hi!"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 2,
+                    "total_tokens": 13,
+                },
             },
         )
 

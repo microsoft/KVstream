@@ -79,7 +79,9 @@ async def test_streaming_completion(client):
                 chunks.append(line[6:])
     assert chunks[-1] == "[DONE]"
     text = "".join(
-        json.loads(c)["choices"][0]["delta"].get("content", "") for c in chunks if c != "[DONE]"
+        json.loads(c)["choices"][0]["delta"].get("content", "")
+        for c in chunks
+        if c != "[DONE]"
     )
     assert text == "Hello, world!"
 

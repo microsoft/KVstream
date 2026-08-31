@@ -94,7 +94,9 @@ def build_simulator(model: RuntimeModel | None = None) -> FastAPI:
     @app.post("/v1/chat/completions")
     async def chat(request: Request):
         body = await request.json()
-        prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+        prompt_chars = sum(
+            len(str(m.get("content") or "")) for m in body.get("messages", [])
+        )
         prompt_tokens = max(1, prompt_chars // 4)
         max_tokens = int(body.get("max_tokens") or 128)
 
@@ -147,7 +149,9 @@ def build_simulator(model: RuntimeModel | None = None) -> FastAPI:
 
             runtime.served += 1
             runtime.latencies.append(time.perf_counter() - started)
-            return StreamingResponse(_counted(stream(), runtime), media_type="text/event-stream")
+            return StreamingResponse(
+                _counted(stream(), runtime), media_type="text/event-stream"
+            )
         finally:
             if not body.get("stream"):
                 runtime.in_flight -= 1

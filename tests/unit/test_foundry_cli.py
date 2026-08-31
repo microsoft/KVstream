@@ -121,7 +121,9 @@ async def test_detect_reports_absent_when_there_is_no_binary(monkeypatch):
 async def test_detect_classifies_a_real_binary(monkeypatch):
     monkeypatch.setattr(foundry_cli.shutil, "which", lambda name: "/usr/bin/foundry")
     monkeypatch.setattr(
-        foundry_cli, "_run", lambda argv, timeout: (0, "Foundry Local CLI 0.10.0 (Preview)")
+        foundry_cli,
+        "_run",
+        lambda argv, timeout: (0, "Foundry Local CLI 0.10.0 (Preview)"),
     )
     cli = await detect()
     assert (cli.version, cli.generation) == ("0.10.0", GEN_SDK)
@@ -145,7 +147,9 @@ async def test_query_endpoint_reads_the_sdk_dialect(monkeypatch):
         return 1, ""
 
     monkeypatch.setattr(foundry_cli, "_run", fake_run)
-    found = await query_endpoint(FoundryCli(path="foundry", version="0.10.0", generation=GEN_SDK))
+    found = await query_endpoint(
+        FoundryCli(path="foundry", version="0.10.0", generation=GEN_SDK)
+    )
     assert found is not None
     assert found.url == "http://127.0.0.1:52149"
     assert found.command == "foundry status --output json"
@@ -155,7 +159,10 @@ async def test_query_endpoint_reads_the_sdk_dialect(monkeypatch):
 async def test_query_endpoint_reads_the_service_dialect(monkeypatch):
     def fake_run(argv, timeout):
         if argv[1:] == ["service", "status"]:
-            return 0, "Model management service is running on http://127.0.0.1:5273/openai/status"
+            return (
+                0,
+                "Model management service is running on http://127.0.0.1:5273/openai/status",
+            )
         return 1, "unknown command"
 
     monkeypatch.setattr(foundry_cli, "_run", fake_run)
@@ -191,7 +198,9 @@ async def test_malformed_json_is_a_miss_not_an_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_json_without_an_endpoint_is_a_miss(monkeypatch):
     monkeypatch.setattr(
-        foundry_cli, "_run", lambda argv, timeout: (0, '{"status": "running", "models": []}')
+        foundry_cli,
+        "_run",
+        lambda argv, timeout: (0, '{"status": "running", "models": []}'),
     )
     assert await query_endpoint(FoundryCli(path="foundry", generation=GEN_SDK)) is None
 
@@ -222,6 +231,7 @@ async def test_list_models_reads_the_catalog(monkeypatch):
 async def test_list_models_is_not_attempted_on_the_service_cli():
     """`foundry model list --output json` is a 0.10.x surface."""
     assert await list_models(FoundryCli(path="foundry", generation=GEN_SERVICE)) is None
+
 
 # -- what the real CLI actually prints ---------------------------------
 

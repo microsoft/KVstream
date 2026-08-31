@@ -38,8 +38,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
 logger = logging.getLogger("kvstream.health")
 
-CLOSED = "closed"        # normal operation
-OPEN = "open"            # failing fast; the backend is presumed unusable
+CLOSED = "closed"  # normal operation
+OPEN = "open"  # failing fast; the backend is presumed unusable
 HALF_OPEN = "half_open"  # cooldown elapsed; one trial is allowed through
 
 
@@ -128,14 +128,19 @@ class CircuitBreaker:
         self.last_error = error[:200]
         if not self.enabled:
             return
-        if self.state == HALF_OPEN or self.consecutive_failures >= self.failure_threshold:
+        if (
+            self.state == HALF_OPEN
+            or self.consecutive_failures >= self.failure_threshold
+        ):
             if self.state != OPEN:
                 self.trips += 1
                 logger.warning(
                     "circuit breaker open after %d consecutive backend failures: %s. "
                     "Requests will fail fast for %.0fs rather than queue behind a "
                     "backend that is not serving.",
-                    self.consecutive_failures, self.last_error, self.reset_seconds,
+                    self.consecutive_failures,
+                    self.last_error,
+                    self.reset_seconds,
                 )
             self.state = OPEN
             self.opened_at = time.monotonic()
@@ -155,7 +160,9 @@ class CircuitBreaker:
             "trips": self.trips,
             "fast_failures": self.fast_failures,
             "last_error": self.last_error,
-            "retry_after_seconds": self.retry_after_seconds if self.state == OPEN else 0,
+            "retry_after_seconds": (
+                self.retry_after_seconds if self.state == OPEN else 0
+            ),
         }
 
 
@@ -211,7 +218,11 @@ class BackendHealth:
             )
             return self.readiness
 
-        if not force and self.readiness.checked_at and self.readiness.age_seconds < self._interval:
+        if (
+            not force
+            and self.readiness.checked_at
+            and self.readiness.age_seconds < self._interval
+        ):
             return self.readiness
 
         if self._lock.locked():

@@ -70,9 +70,7 @@ def calibration_key_for(
     )
 
 
-def resolve_budget(
-    cfg: AdmissionConfig, key: CalibrationKey
-) -> tuple[int, str, dict]:
+def resolve_budget(cfg: AdmissionConfig, key: CalibrationKey) -> tuple[int, str, dict]:
     """
     Resolve the effective ``(budget, unit, provenance)`` from configuration.
 
@@ -102,7 +100,8 @@ def resolve_budget(
         logger.warning(
             "admission.mode=tokens but no budget configured or calibrated for %s: %s. "
             "Falling back to concurrency mode (run `kvstream calibrate`).",
-            key.as_str(), lookup.detail,
+            key.as_str(),
+            lookup.detail,
         )
         provenance["source"] = "fallback:concurrency"
 

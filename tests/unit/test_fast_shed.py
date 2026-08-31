@@ -33,7 +33,9 @@ def _mgr(budget=4, timeout=5.0, depth=100, samples=2, hopeless=True) -> Capacity
     )
 
 
-async def _teach_rate(cm: CapacityManager, seconds_per_release: float, n: int = 4) -> None:
+async def _teach_rate(
+    cm: CapacityManager, seconds_per_release: float, n: int = 4
+) -> None:
     """Run n requests through so the manager learns how fast the backend drains."""
     for i in range(n):
         await cm.admit(f"warm-{i}", 1)
@@ -55,12 +57,12 @@ async def test_a_burst_of_instant_failures_does_not_inflate_the_rate():
     done.
     """
     cm = _mgr(budget=8, samples=2)
-    for i in range(20):                       # a burst of instant completions
+    for i in range(20):  # a burst of instant completions
         await cm.admit(f"fast-{i}", 1)
         await cm.release(f"fast-{i}")
     burst_rate = cm.drain_rate
 
-    await asyncio.sleep(0.3)                  # then nothing completes at all
+    await asyncio.sleep(0.3)  # then nothing completes at all
     assert cm.drain_rate <= burst_rate
 
 
@@ -80,7 +82,7 @@ async def test_nothing_is_refused_before_the_rate_is_known():
     await cm.admit("holder", 1)
     waiter = asyncio.create_task(cm.admit("w", 1))
     await asyncio.sleep(0)
-    assert not waiter.done()              # queued, not refused
+    assert not waiter.done()  # queued, not refused
     assert cm.stats()["hopeless_rejections"] == 0
     waiter.cancel()
     await asyncio.gather(waiter, return_exceptions=True)
@@ -98,7 +100,7 @@ async def test_predicted_wait_is_zero_without_samples():
 async def test_a_hopeless_request_is_refused_immediately():
     """The whole point: refused in milliseconds, not after the timeout."""
     cm = _mgr(budget=1, timeout=1.0, samples=2)
-    await _teach_rate(cm, 0.1)            # ~10 completions/second
+    await _teach_rate(cm, 0.1)  # ~10 completions/second
 
     await cm.admit("holder", 1)
     queued = [asyncio.create_task(cm.admit(f"q{i}", 1)) for i in range(60)]
@@ -109,7 +111,7 @@ async def test_a_hopeless_request_is_refused_immediately():
         await cm.admit("late", 1)
     elapsed = asyncio.get_event_loop().time() - started
 
-    assert elapsed < 0.05                  # not the 1.0s timeout
+    assert elapsed < 0.05  # not the 1.0s timeout
     assert caught.value.predicted_wait > 1.0
     assert "beyond the" in str(caught.value)
     for task in queued:
@@ -121,7 +123,7 @@ async def test_a_hopeless_request_is_refused_immediately():
 async def test_a_servable_request_is_still_queued():
     """A short queue must not be refused just because a queue exists."""
     cm = _mgr(budget=1, timeout=10.0, samples=2)
-    await _teach_rate(cm, 0.02)           # fast backend
+    await _teach_rate(cm, 0.02)  # fast backend
 
     await cm.admit("holder", 1)
     queued = [asyncio.create_task(cm.admit(f"q{i}", 1)) for i in range(3)]
@@ -129,7 +131,7 @@ async def test_a_servable_request_is_still_queued():
 
     ok = asyncio.create_task(cm.admit("ok", 1))
     await asyncio.sleep(0)
-    assert not ok.done()                  # waiting, not refused
+    assert not ok.done()  # waiting, not refused
     assert cm.stats()["hopeless_rejections"] == 0
 
     for task in [*queued, ok]:
@@ -158,8 +160,11 @@ async def test_the_prediction_scales_with_the_queue():
 async def test_the_prediction_scales_with_request_cost():
     """In token mode a bigger request needs more headroom, so it waits longer."""
     cm = CapacityManager(
-        budget=100, unit="tokens", admission_timeout=1000.0,
-        max_queue_depth=100, min_rate_samples=2,
+        budget=100,
+        unit="tokens",
+        admission_timeout=1000.0,
+        max_queue_depth=100,
+        min_rate_samples=2,
     )
     for i in range(4):
         await cm.admit(f"w{i}", 10)
