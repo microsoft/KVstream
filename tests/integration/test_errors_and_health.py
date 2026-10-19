@@ -66,9 +66,10 @@ class EmptyBackend(BrokenBackend):
         yield Token(text="ok", finish_reason="stop")
 
 
-def _app(backend) -> tuple:
+def _app(backend, force_min_interval: float = 5.0) -> tuple:
     settings = Settings()
     settings.backend.model = "stub-model"
+    settings.backend.readiness_force_min_interval_seconds = force_min_interval
     app = build_app(settings)
     app.state.gateway.backend = backend
     return app, app.state.gateway
@@ -183,13 +184,13 @@ async def test_reachable_but_not_serving_is_degraded():
     Real Foundry Local answered /v1/models in 4ms for minutes while a 4-token
     generation never returned. Liveness alone said everything was fine.
     """
-    app, _ = _app(BrokenBackend(healthy=True))   # /v1/models ok, generation fails
+    app, _ = _app(BrokenBackend(healthy=True))  # /v1/models ok, generation fails
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
     body = r.json()
     assert r.status_code == 503
-    assert body["backend_reachable"] is True     # liveness passes...
-    assert body["backend_serving"] is False      # ...readiness does not
+    assert body["backend_reachable"] is True  # liveness passes...
+    assert body["backend_serving"] is False  # ...readiness does not
     assert body["readiness"]["ready"] is False
     assert "not serving" in body["hint"]
 
@@ -200,14 +201,28 @@ async def test_readiness_is_cached_so_the_probe_is_not_load():
     from stubs import StubBackend
 
     backend = StubBackend()
-    app, _ = _app(backend)
+    app, _ = _app(backend, force_min_interval=0.0)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         for _ in range(5):
             await c.get("/health")
         cached = backend.once_calls
-        await c.get("/health?probe=true")          # explicit refresh
-    assert cached == 1                              # five checks, one generation
-    assert backend.once_calls == 2                  # forced probe ran
+        await c.get("/health?probe=true")  # explicit refresh
+    assert cached == 1  # five checks, one generation
+    assert backend.once_calls == 2  # forced probe ran
+
+
+@pytest.mark.asyncio
+async def test_forced_probes_are_rate_limited():
+    """`?probe=true` in a loop must not become unadmitted generations."""
+    from stubs import StubBackend
+
+    backend = StubBackend()
+    app, _ = _app(backend)  # default 5 s minimum between forced probes
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        for _ in range(10):
+            r = await c.get("/health?probe=true")
+            assert r.status_code == 200
+    assert backend.once_calls == 1
 
 
 def test_refuses_to_start_as_one_of_several_workers(monkeypatch):

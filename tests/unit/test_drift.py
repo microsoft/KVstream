@@ -38,7 +38,7 @@ def test_it_waits_for_enough_traffic():
 def test_a_healthy_backend_reads_ok():
     m = _monitor(baseline=0.01)
     for _ in range(20):
-        m.observe(1.0, 100)          # 0.01 s/token — exactly the baseline
+        m.observe(1.0, 100)  # 0.01 s/token — exactly the baseline
     assert m.state == OK
     assert 0.9 < m.ratio < 1.1
 
@@ -46,7 +46,7 @@ def test_a_healthy_backend_reads_ok():
 def test_a_degrading_backend_is_flagged():
     m = _monitor(baseline=0.01)
     for _ in range(40):
-        m.observe(5.0, 100)          # 0.05 s/token — five times slower
+        m.observe(5.0, 100)  # 0.05 s/token — five times slower
     assert m.state == DEGRADED
     assert m.ratio > 3.0
 
@@ -81,9 +81,9 @@ def test_request_size_does_not_read_as_drift():
     """
     m = _monitor(baseline=0.01)
     for _ in range(10):
-        m.observe(1.0, 100)          # small requests
+        m.observe(1.0, 100)  # small requests
     for _ in range(10):
-        m.observe(20.0, 2000)        # large requests, same rate per token
+        m.observe(20.0, 2000)  # large requests, same rate per token
     assert m.state == OK
 
 
@@ -98,12 +98,14 @@ def test_nonsense_samples_are_ignored():
 # -- recovering the baseline from a stored calibration -----------------
 
 
-def test_baseline_comes_from_the_stored_sweep():
+def test_baseline_comes_from_the_recorded_knee_median():
+    """Median s/token over actually-processed tokens at the knee — the live basis."""
     provenance = {
         "source": "calibration:exact",
         "lookup": {
             "record": {
                 "budget_tokens": 688,
+                "baseline_seconds_per_token": 0.0007,
                 "sweep": [
                     {"concurrency": 1, "p99_per_token": 0.0006, "errors": 0},
                     {"concurrency": 2, "p99_per_token": 0.0009, "errors": 0},
@@ -111,11 +113,15 @@ def test_baseline_comes_from_the_stored_sweep():
             }
         },
     }
-    assert baseline_from_provenance(provenance) == 0.0009
+    assert baseline_from_provenance(provenance) == 0.0007
 
 
-def test_unhealthy_sweep_points_are_excluded():
-    """The baseline is what healthy looked like, not what failure looked like."""
+def test_a_legacy_record_disables_drift_rather_than_comparing_unlike_units():
+    """
+    Old records only hold p99s over *requested* tokens. The old baseline (the
+    worst of those) was compared with a mean over *actual* tokens, so the ratio
+    meant nothing; such records now leave drift detection inactive.
+    """
     provenance = {
         "lookup": {
             "record": {
@@ -126,7 +132,7 @@ def test_unhealthy_sweep_points_are_excluded():
             }
         }
     }
-    assert baseline_from_provenance(provenance) == 0.0006
+    assert baseline_from_provenance(provenance) == 0.0
 
 
 def test_a_configured_budget_has_no_baseline():

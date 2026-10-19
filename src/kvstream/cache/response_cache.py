@@ -54,15 +54,23 @@ class CachedResponse:
         return self.body is not None or bool(self.chunks)
 
 
-def request_key(req: ChatCompletionRequest, raw: dict) -> str:
+def request_key(req: ChatCompletionRequest, raw: dict, caller: str | None = None) -> str:
     """
     Stable hash of everything the client sent that can change the output.
 
     Hashing the client's own object — rather than a hand-picked field list —
     means a request carrying ``tools``, ``seed`` or ``response_format`` cannot
     collide with an otherwise identical one that does not.
+
+    ``caller`` is the credential forwarded upstream with the request, when
+    there is one. It is part of the key because the backend answers *that
+    caller*: without it, two callers sending the same body shared one upstream
+    call made with the first caller's credentials, and a cached answer (or a
+    401) produced for one caller was served to another.
     """
     material = json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
+    if caller:
+        material += "|caller:" + hashlib.sha256(caller.encode("utf-8")).hexdigest()
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 

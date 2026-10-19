@@ -74,9 +74,9 @@ class ChatCompletionRequest(BaseModel):
 
     model: str
     messages: list[ChatMessage]
-    # Absent means "the model's default" — KVStream does not impose one on the
-    # backend. `admission.default_max_tokens` is used to *cost* such a request,
-    # and is never sent upstream.
+    # When both are absent, `admission.default_max_tokens` (`--max-tokens`) is
+    # both the cost basis and, unless `admission.apply_default_max_tokens` is
+    # off, the limit sent upstream — see `fill_max_tokens`.
     max_tokens: int | None = Field(default=None, gt=0)
     max_completion_tokens: int | None = Field(default=None, gt=0)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
@@ -112,14 +112,16 @@ class ChatCompletionRequest(BaseModel):
         return max(1, limit) * self.n
 
 
-def backend_payload(raw: dict, *, stream: bool) -> dict:
+def backend_payload(raw: dict, *, stream: bool, default_max_tokens: int | None = None) -> dict:
     """
     The body to forward upstream: the client's own object, minimally adjusted.
 
-    Only three things change. ``stream`` is set to whatever path the gateway is
+    Only four things change. ``stream`` is set to whatever path the gateway is
     actually taking; ``stream_options`` is dropped on the non-streamed path
-    (where it is meaningless); and an empty ``stop`` is removed, because Foundry
-    Local answers HTTP 400 for one.
+    (where it is meaningless); an empty ``stop`` is removed, because Foundry
+    Local answers HTTP 400 for one; and a missing generation limit is filled
+    in with ``default_max_tokens`` when one is given (see
+    :func:`fill_max_tokens`).
     """
     payload = dict(raw)
     payload["stream"] = stream
@@ -127,7 +129,26 @@ def backend_payload(raw: dict, *, stream: bool) -> dict:
         payload.pop("stream_options", None)
     if "stop" in payload and not payload["stop"]:
         payload.pop("stop")
-    return payload
+    return fill_max_tokens(payload, default_max_tokens)
+
+
+def fill_max_tokens(payload: dict, default_max_tokens: int | None) -> dict:
+    """
+    ``payload`` with ``max_tokens`` set to ``default_max_tokens`` if it sets no limit.
+
+    A request without a limit was admitted on ``default_max_tokens`` but could
+    generate up to the model's own limit, which exceeded the budget it was
+    admitted against. Sending the same number upstream makes the cost and the
+    work agree. A limit the client did set — ``max_tokens`` or
+    ``max_completion_tokens`` — is never changed, and ``None`` changes nothing.
+    """
+    if default_max_tokens is None:
+        return payload
+    if payload.get("max_tokens") is not None or payload.get("max_completion_tokens") is not None:
+        return payload
+    filled = dict(payload)
+    filled["max_tokens"] = default_max_tokens
+    return filled
 
 
 class EmbeddingsRequest(BaseModel):

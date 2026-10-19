@@ -80,7 +80,7 @@ async def test_a_large_request_is_not_starved_by_a_stream_of_small_ones():
     await cm.release("holder")
     await asyncio.wait_for(big_admitted.wait(), timeout=1.0)
 
-    assert cm.in_flight == 100          # the big one holds the whole budget
+    assert cm.in_flight == 100  # the big one holds the whole budget
     await _abandon(*small_tasks, big_task)
 
 
@@ -203,7 +203,7 @@ async def test_reclaimed_budget_drains_the_queue_immediately():
     await asyncio.sleep(0)
     assert cm.waiting == 1
 
-    await cm.adjust("long", cm.live_cost(rc, 5))   # generation stopped early
+    await cm.adjust("long", cm.live_cost(rc, 5))  # generation stopped early
     await asyncio.sleep(0.05)
     assert waiter.done()
     assert cm.in_flight == 65
@@ -236,7 +236,7 @@ async def test_draining_turns_away_the_queue_but_not_the_in_flight():
     turned_away = await cm.start_draining()
     assert turned_away == 3
     assert cm.draining is True
-    assert cm.in_flight == 100          # the running request is left alone
+    assert cm.in_flight == 100  # the running request is left alone
 
     await _abandon(*queued)
 

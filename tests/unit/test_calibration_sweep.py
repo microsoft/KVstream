@@ -15,6 +15,7 @@ import asyncio
 import pytest
 
 from kvstream.admission.calibration import (
+    CalibrationFailed,
     CalibrationKey,
     CalibrationService,
     SweepPoint,
@@ -119,9 +120,7 @@ def test_find_knee_still_behaves():
 async def test_the_sweep_warms_up_before_measuring(tmp_path, monkeypatch):
     """A cold first request must not become the baseline everything is judged against."""
     backend = FakeBackend(ceiling=8, cold=10.0)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=1, refine=False)
@@ -156,9 +155,7 @@ async def test_bisection_narrows_the_knee(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=2, trials=4, warmup=0, refine=False)
@@ -169,9 +166,7 @@ async def test_trials_pool_their_latencies(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_the_sweep_uses_mixed_request_shapes(tmp_path, monkeypatch):
     backend = FakeBackend(ceiling=8)
-    svc = CalibrationService(
-        backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu")
-    )
+    svc = CalibrationService(backend, str(tmp_path / "c.json"), CalibrationKey("stub-model", "cpu"))
     _stub_latency(monkeypatch, svc, backend)
 
     await svc.calibrate(max_concurrency=4, trials=1, warmup=0, refine=False)
@@ -190,32 +185,36 @@ async def test_the_result_is_stored_under_the_full_key(tmp_path, monkeypatch):
     hit = lookup_budget(store, key)
     assert hit.match == "exact"
     assert hit.budget_tokens == budget
-    assert hit.record["sweep"]          # the evidence is kept with the number
+    assert hit.record["sweep"]  # the evidence is kept with the number
     assert hit.age_seconds >= 0
 
 
 @pytest.mark.asyncio
-async def test_a_backend_that_fails_everything_yields_a_single_request_budget(tmp_path):
+async def test_a_backend_that_fails_everything_fails_calibration_and_saves_nothing(tmp_path):
+    """
+    It used to save the smallest probe size as a "calibrated" budget and report
+    success — a number describing nothing, then used by token-mode admission.
+    """
+
     class Dead:
         model = "stub-model"
         base_url = "http://stub"
 
         async def chat(self, payload, headers=None):
-            raise RuntimeError("backend down")
+            raise RuntimeError("Model 'stub-model' is not loaded")
             yield  # pragma: no cover
 
     store = str(tmp_path / "c.json")
     svc = CalibrationService(Dead(), store, CalibrationKey("stub-model", "cpu"))
-    budget = await svc.calibrate(max_concurrency=4, trials=1, warmup=0)
-    # Enough for one probe request and no more — honest about knowing nothing.
-    assert budget > 0
-    assert budget <= 256 + 64
+    with pytest.raises(CalibrationFailed, match="not loaded"):
+        await svc.calibrate(max_concurrency=4, trials=1, warmup=0)
+    assert lookup_budget(store, CalibrationKey("stub-model", "cpu")).match == "none"
 
 
 def _stub_latency(monkeypatch, service: CalibrationService, backend: FakeBackend) -> None:
     """Make `_probe_once` report the backend's synthetic latency directly."""
 
-    async def probe(prompt_tokens: int, max_tokens: int) -> float | None:
+    async def probe(prompt_tokens: int, max_tokens: int) -> tuple[float, int, int] | None:
         latency = None
         try:
             async for tok in backend.chat(
@@ -228,6 +227,10 @@ def _stub_latency(monkeypatch, service: CalibrationService, backend: FakeBackend
                 latency = tok.latency
         except Exception:  # noqa: BLE001
             return None
-        return latency
+        if latency is None:
+            return None
+        # (latency, prompt tokens, generated tokens): the fake generates the
+        # whole allowance.
+        return latency, prompt_tokens, max_tokens
 
     monkeypatch.setattr(service, "_probe_once", probe)

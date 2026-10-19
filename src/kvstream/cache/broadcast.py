@@ -21,17 +21,27 @@ non-streaming path was inactive for the dominant traffic shape.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 
 class StreamBroadcast:
-    """An in-progress streamed response that late arrivals can join."""
+    """
+    An in-progress streamed response that late arrivals can join.
+
+    Every client of a stream — the one that started it included — is a
+    subscriber. The producer is owned by the gateway, not by any client, so a
+    client leaving never truncates what the others receive. When the *last*
+    subscriber leaves before the stream finishes, the ``on_abandoned`` callback
+    fires so the producer can stop generating text nobody will read.
+    """
 
     def __init__(self) -> None:
         self._chunks: list[bytes] = []
         self._event = asyncio.Event()
         self._done = False
         self._error: BaseException | None = None
+        self._subscribers = 0
+        self._on_abandoned: Callable[[], object] | None = None
         self.followers = 0
 
     # -- producer ------------------------------------------------------
@@ -57,24 +67,49 @@ class StreamBroadcast:
     def done(self) -> bool:
         return self._done
 
-    async def follow(self) -> AsyncIterator[bytes]:
+    @property
+    def subscribers(self) -> int:
+        """Clients currently reading this stream."""
+        return self._subscribers
+
+    def on_abandoned(self, callback: Callable[[], object]) -> None:
+        """Call ``callback`` if every subscriber leaves before the stream ends."""
+        self._on_abandoned = callback
+
+    def follow(self) -> AsyncIterator[bytes]:
         """
         Replay everything sent so far, then track the leader to completion.
 
         The leader is never blocked by this: it only ever appends. A follower
         that cannot keep up falls behind in its own iteration, not the
         producer's.
+
+        The subscriber is counted the moment it joins, not when its iterator
+        first runs. Otherwise a follower whose response has not started yet
+        would be invisible, and the original client leaving in that window
+        would cancel a generation the follower is about to read. The cost is
+        the safe direction: an iterator that is created and never read keeps
+        the generation running to completion.
         """
-        index = 0
-        while True:
-            while index < len(self._chunks):
-                yield self._chunks[index]
-                index += 1
-            if self._done:
-                if self._error is not None:
-                    raise self._error
-                return
-            await self._event.wait()
+        self._subscribers += 1
+        return self._follow()
+
+    async def _follow(self) -> AsyncIterator[bytes]:
+        try:
+            index = 0
+            while True:
+                while index < len(self._chunks):
+                    yield self._chunks[index]
+                    index += 1
+                if self._done:
+                    if self._error is not None:
+                        raise self._error
+                    return
+                await self._event.wait()
+        finally:
+            self._subscribers -= 1
+            if self._subscribers == 0 and not self._done and self._on_abandoned is not None:
+                self._on_abandoned()
 
 
 class StreamCoalescer:

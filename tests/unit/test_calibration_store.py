@@ -81,8 +81,12 @@ def test_v1_flat_record_is_migrated_not_discarded(tmp_path):
     store = tmp_path / "c.json"
     store.write_text(
         json.dumps(
-            {"budget_tokens": 5000, "model": "phi-3-mini",
-             "base_url": "http://localhost:5273", "measured_at": 1.0}
+            {
+                "budget_tokens": 5000,
+                "model": "phi-3-mini",
+                "base_url": "http://localhost:5273",
+                "measured_at": 1.0,
+            }
         ),
         encoding="utf-8",
     )

@@ -128,8 +128,8 @@ def test_stop_accepts_a_bare_string():
 
 def test_absent_max_tokens_uses_the_configured_default_for_costing_only():
     req = ChatCompletionRequest(model="m", messages=[])
-    assert req.max_tokens is None                 # nothing to send upstream
-    assert req.generation_budget(512) == 512      # but it still has to be costed
+    assert req.max_tokens is None  # nothing to send upstream
+    assert req.generation_budget(512) == 512  # but it still has to be costed
 
 
 def test_max_completion_tokens_is_honoured():
@@ -177,6 +177,9 @@ def test_multi_choice_is_never_deterministic():
 
 def test_wants_usage_reflects_the_clients_own_request():
     assert ChatCompletionRequest(model="m", messages=[]).wants_usage is False
-    assert ChatCompletionRequest(
-        model="m", messages=[], stream_options={"include_usage": True}
-    ).wants_usage is True
+    assert (
+        ChatCompletionRequest(
+            model="m", messages=[], stream_options={"include_usage": True}
+        ).wants_usage
+        is True
+    )

@@ -55,7 +55,7 @@ class StalledBackend:
         yield  # pragma: no cover
 
     async def health(self) -> bool:
-        return True                      # /v1/models keeps answering
+        return True  # /v1/models keeps answering
 
     async def list_models(self):
         return ["stub-model"]
@@ -102,7 +102,7 @@ async def test_health_is_503_when_the_backend_cannot_generate(stalled):
     r = await c.get("/health")
     body = r.json()
     assert r.status_code == 503
-    assert body["backend_reachable"] is True     # exactly what misled us
+    assert body["backend_reachable"] is True  # exactly what misled us
     assert body["backend_serving"] is False
     assert "not serving" in body["hint"]
 
@@ -123,7 +123,7 @@ async def test_status_separates_reachable_from_serving(stalled):
 async def test_the_breaker_opens_and_then_fails_fast(stalled):
     c, gw, backend = stalled
 
-    for _ in range(3):                            # threshold
+    for _ in range(3):  # threshold
         assert (await c.post("/v1/chat/completions", json=CHAT)).status_code == 502
     assert gw.health.breaker.state == "open"
     attempts_at_trip = backend.attempts
@@ -158,7 +158,7 @@ async def test_failing_fast_is_fast():
         elapsed = asyncio.get_event_loop().time() - started
 
     assert r.status_code == 503
-    assert elapsed < 0.2          # nowhere near the 0.4s the backend would take
+    assert elapsed < 0.2  # nowhere near the 0.4s the backend would take
 
 
 @pytest.mark.asyncio
@@ -183,7 +183,7 @@ async def test_the_breaker_recovers_when_the_backend_does():
             await c.post("/v1/chat/completions", json=CHAT)
         assert gw.health.breaker.state == "open"
 
-        gw.backend = StubBackend()                # the runtime was restarted
+        gw.backend = StubBackend()  # the runtime was restarted
         r = await c.post("/v1/chat/completions", json=CHAT)
 
     assert r.status_code == 200

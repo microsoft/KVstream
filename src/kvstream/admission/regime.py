@@ -117,11 +117,14 @@ def classify_runtime(points) -> RuntimeProfile:
     # "first" and "last" as low and high concurrency.
     ordered = sorted(points, key=lambda p: p.concurrency)
     usable = [p for p in ordered if p.tokens_per_second > 0 and not p.errors]
+    # Only a *refusal* is evidence of a cap. A request that timed out was
+    # accepted and then waited — what a serialising runtime does under load.
     refuses_beyond = None
     for point in ordered:
-        if point.errors:
+        if point.refusals:
             refuses_beyond = point.concurrency
             break
+    timed_out = next((p.concurrency for p in ordered if p.timeouts), None)
 
     if len(usable) < 2:
         # One healthy point tells us nothing about how the runtime scales — but
@@ -156,6 +159,9 @@ def classify_runtime(points) -> RuntimeProfile:
             f"{usable[0].concurrency}–{usable[-1].concurrency}"
         )
         optimal = 1
+
+    if timed_out is not None and refuses_beyond is None:
+        detail = f"{detail}; requests timed out from concurrency {timed_out}"
 
     # A cap is a fact about the runtime regardless of how it scales below it,
     # and it is the more actionable of the two, so it wins the label.

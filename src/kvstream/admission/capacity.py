@@ -90,8 +90,23 @@ class RequestCost:
         return self._weighted(self.prompt_tokens + ceil(self.max_tokens * reserve_ratio))
 
     def live_tokens(self, generated_tokens: int) -> int:
-        """Footprint actually occupied once ``generated_tokens`` have arrived."""
+        """Footprint of a *finished* generation of ``generated_tokens``."""
         return self._weighted(self.prompt_tokens + generated_tokens)
+
+    def held_tokens(self, generated_tokens: int, reserve_ratio: float) -> int:
+        """
+        Footprint to hold while generation is still running.
+
+        The generation may still use everything it was admitted for, so the
+        reservation is never shrunk below that mid-stream; it only grows if the
+        generation outruns it (possible below a ratio of 1.0, or when the
+        request set no limit, ``admission.apply_default_max_tokens`` is off and
+        the model's own limit is higher than ``admission.default_max_tokens``).
+        """
+        reserved = (
+            self.max_tokens if reserve_ratio >= 1.0 else ceil(self.max_tokens * reserve_ratio)
+        )
+        return self._weighted(self.prompt_tokens + max(generated_tokens, reserved))
 
     def _weighted(self, raw_tokens: int) -> int:
         return max(1, ceil(max(0, raw_tokens) * self.kv_weight))
@@ -159,6 +174,11 @@ class CapacityManager:
 
         self._in_flight = 0
         self._reservations: dict[str, int] = {}
+        # Cost each live request was admitted at. Live accounting shrinks a
+        # reservation as tokens arrive, but the budget it frees over its whole
+        # life is what it was admitted at — the same unit queued waiters are
+        # costed in — so that is what the drain rate must count.
+        self._admitted: dict[str, int] = {}
         self._queue: deque[_Waiter] = deque()
         self._lock = asyncio.Lock()
         self._draining = False
@@ -204,6 +224,16 @@ class CapacityManager:
         return len(self._queue)
 
     @property
+    def active(self) -> int:
+        """Requests currently holding a reservation."""
+        return len(self._reservations)
+
+    @property
+    def idle(self) -> bool:
+        """Nothing reserved and nothing queued: safe to retire this manager."""
+        return not self._reservations and not self._queue
+
+    @property
     def reserve_ratio(self) -> float:
         return self._reserve_ratio
 
@@ -227,7 +257,7 @@ class CapacityManager:
 
     def live_cost(self, req: RequestCost, generated_tokens: int) -> int:
         """
-        Cost a request actually occupies once ``generated_tokens`` have arrived.
+        Cost a *finished* request occupied, having generated ``generated_tokens``.
 
         In concurrency mode a request is always worth exactly one slot, so live
         accounting is a no-op there.
@@ -235,6 +265,20 @@ class CapacityManager:
         if self._unit != "tokens":
             return 1
         return req.live_tokens(generated_tokens)
+
+    def held_cost(self, req: RequestCost, generated_tokens: int) -> int:
+        """
+        Cost to hold for a request that is still generating.
+
+        Settling a running stream to what it had generated *so far* handed the
+        rest of its reservation back while it still needed it: other requests
+        were admitted into that headroom, the stream then grew back past it,
+        and the budget was exceeded at the default ratio of 1.0 (counted as
+        overshoots). See :meth:`RequestCost.held_tokens`.
+        """
+        if self._unit != "tokens":
+            return 1
+        return req.held_tokens(generated_tokens, self._reserve_ratio)
 
     @property
     def drain_rate(self) -> float:
@@ -280,7 +324,7 @@ class CapacityManager:
             return 0.0
         return self._cost_ahead(waiter) / rate
 
-    def _may_reject(self) -> bool:
+    def _may_reject(self, cost: int) -> bool:
         """
         Whether refusing on prediction is safe right now.
 
@@ -294,14 +338,24 @@ class CapacityManager:
         itself and the gateway refuses traffic it could have served.
 
         So prediction only gets a vote when the system is unambiguously
-        saturated: every unit of budget in use, and a queue already deeper than
-        the budget itself. Anywhere else, waiting is the safe answer.
+        saturated: a request of ``cost`` cannot fit beside what is in flight,
+        and the queue is already deeper than the budget itself. Anywhere else,
+        waiting is the safe answer.
         """
         if not self._reject_when_hopeless:
             return False
-        if self._in_flight < self._budget:
+        # Saturated means *this request does not fit*. It used to mean
+        # `in_flight >= budget`, which in token mode is rarely true: measured
+        # live, one 70-token request against a 96-token budget left 26 tokens
+        # "free" that nothing could use, so shedding never fired. In
+        # concurrency mode (cost 1) the two tests are the same.
+        if self._in_flight + cost <= self._budget:
             return False
-        return len(self._queue) >= max(2, self._budget)
+        # "A queue deeper than the budget", in the budget's own unit. Comparing
+        # the queue's *length* with a token budget (thousands) meant predictive
+        # shedding could never fire in token mode. In concurrency mode every
+        # waiter costs 1, so queued cost and queue length are the same thing.
+        return len(self._queue) >= 2 and self._queued_cost >= self._budget
 
     def predicted_wait(self, cost: int) -> float:
         """
@@ -363,6 +417,7 @@ class CapacityManager:
     def _reserve(self, req_id: str, cost: int) -> None:
         self._in_flight += cost
         self._reservations[req_id] = cost
+        self._admitted[req_id] = cost
 
     def _drain(self) -> None:
         """
@@ -408,7 +463,7 @@ class CapacityManager:
             # connection open until that deadline expires — and the caller loses
             # every second it spends finding out.
             wait = self.predicted_wait(cost)
-            if self._may_reject() and wait > self._timeout * self._hopeless_margin:
+            if self._may_reject(cost) and wait > self._timeout * self._hopeless_margin:
                 self._q.rejected += 1
                 self._hopeless_rejections += 1
                 raise AdmissionTooSlow(
@@ -440,7 +495,12 @@ class CapacityManager:
                     {waiter.future}, timeout=min(remaining, self._recheck_interval)
                 )
                 if done:
-                    return
+                    if waiter.granted:
+                        return
+                    # The future finished without a grant: `start_draining`
+                    # cancelled it. Returning here would let the request
+                    # proceed as if admitted, with no reservation at all.
+                    raise QueueFull("gateway is shutting down")
                 async with self._lock:
                     if waiter.granted:
                         return
@@ -449,9 +509,10 @@ class CapacityManager:
                     # The margin is deliberate slack: only refuse when the
                     # prediction says the deadline will be missed by a wide
                     # margin, never on a marginal call.
-                    if self._may_reject() and predicted > left * self._hopeless_margin > 0:
+                    hopeless = predicted > left * self._hopeless_margin > 0
+                    if hopeless and self._may_reject(waiter.cost):
                         self._discard(waiter)
-                        self._q.timed_out -= 1        # counted below as hopeless
+                        self._q.timed_out -= 1  # counted below as hopeless
                         self._hopeless_rejections += 1
                         self._q.rejected += 1
                         self._drain()
@@ -499,13 +560,17 @@ class CapacityManager:
 
         * **Shrinking** returns the unused headroom immediately and drains the
           queue, so waiters start the moment budget is known to be free rather
-          than when the HTTP body finishes. Always safe.
-        * **Growing** happens only when a generation outruns a reservation that
-          was deliberately sized below the worst case
-          (``admission.reserve_completion_ratio`` < 1.0). Truncating a
+          than when the HTTP body finishes. Safe once the generation has
+          finished; the caller holds the full reservation until then
+          (:meth:`held_cost`).
+        * **Growing** happens when a generation outruns its reservation: one
+          deliberately sized below the worst case
+          (``admission.reserve_completion_ratio`` < 1.0), or — with
+          ``admission.apply_default_max_tokens`` off — one costed with
+          ``admission.default_max_tokens`` because the request set no limit
+          and the model's own limit is higher. Truncating a
           half-delivered response would be worse than briefly exceeding the
           budget, so the reservation is topped up and the event is counted.
-          With the default ratio of 1.0 this cannot occur.
 
         Never blocks. Unknown ``req_id`` (already released) is a no-op.
         """
@@ -528,9 +593,13 @@ class CapacityManager:
 
     def _release_locked(self, req_id: str) -> None:
         cost = self._reservations.pop(req_id, None)
+        admitted = self._admitted.pop(req_id, 0)
         if cost is not None:
             self._in_flight = max(0, self._in_flight - cost)
-            self._observe_release(cost)
+            # Not `cost`: that is the reservation after live accounting shrank
+            # it, so a token-mode drain rate would be measured in a smaller unit
+            # than the queue it is divided into, over-predicting every wait.
+            self._observe_release(max(cost, admitted))
 
     async def release(self, req_id: str) -> None:
         """Release ``req_id``'s reservation and admit whoever fits. Idempotent."""

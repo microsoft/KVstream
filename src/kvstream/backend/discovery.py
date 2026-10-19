@@ -38,6 +38,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from kvstream.backend.inventory import matches
+
 logger = logging.getLogger("kvstream.discovery")
 
 # Response header KVStream stamps on every response, so gateways can recognise
@@ -49,33 +51,108 @@ KIND_OLLAMA = "ollama"
 KIND_OPENAI = "openai-compatible"
 
 
-def list_listening_ports() -> list[int]:
-    """Return TCP LISTENING ports (> 1024) on localhost. Blocking; run in a thread."""
+# A listening TCP socket in `netstat -ano`, recognised by *structure*: a local
+# address reachable as localhost, and a wildcard foreign address. The state
+# column is deliberately not read — Windows localizes it ("LISTENING" is not
+# what a German or Japanese install prints), and only a listener has the
+# wildcard foreign address, in every language.
+_NETSTAT_LISTENER = re.compile(
+    r"^\s*TCP\s+(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|\[::1\]):(\d+)\s+(?:0\.0\.0\.0:0|\[::\]:0)\s",
+    re.IGNORECASE,
+)
+_SS_LOCAL_PORT = re.compile(r":(\d+)\s")
+
+
+def parse_netstat(output: str) -> set[int]:
+    """Listening localhost ports (> 1024) from ``netstat -ano`` output, any locale."""
     ports: set[int] = set()
+    for line in output.splitlines():
+        match = _NETSTAT_LISTENER.match(line)
+        if match and int(match.group(1)) > 1024:
+            ports.add(int(match.group(1)))
+    return ports
+
+
+_BSD_LOCAL_HOSTS = {"*", "127.0.0.1", "::1"}
+
+
+def parse_bsd_netstat(output: str) -> set[int]:
+    """
+    Listening localhost ports (> 1024) from macOS ``netstat -an -p tcp`` output.
+
+    The BSD format joins address and port with a dot (``127.0.0.1.5273``,
+    ``*.80``, ``::1.8080``) and names the protocol ``tcp4``, ``tcp6`` or
+    ``tcp46``. As with Windows, a listener is recognised by structure — its
+    foreign address is the wildcard ``*.*`` — not by the state word.
+    """
+    ports: set[int] = set()
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or not fields[0].lower().startswith("tcp"):
+            continue
+        local, foreign = fields[3], fields[4]
+        if foreign != "*.*":
+            continue
+        host, _, port = local.rpartition(".")
+        if host in _BSD_LOCAL_HOSTS and port.isdigit() and int(port) > 1024:
+            ports.add(int(port))
+    return ports
+
+
+def parse_ss(output: str) -> set[int]:
+    """Listening ports (> 1024) from ``ss -tlnH`` output (listeners only, by flag)."""
+    ports: set[int] = set()
+    for line in output.splitlines():
+        match = _SS_LOCAL_PORT.search(line)
+        if match and int(match.group(1)) > 1024:
+            ports.add(int(match.group(1)))
+    return ports
+
+
+def list_listening_ports() -> list[int]:
+    """Return TCP listening ports (> 1024) on localhost. Blocking; run in a thread."""
     try:
         if sys.platform == "win32":
+            # No `-p TCP`: that lists IPv4 only, so a backend listening on
+            # [::1] or [::] alone was never found. Decoded as ASCII with
+            # replacement: the parts parsed are ASCII, and netstat writes the
+            # OEM code page (437 here) while Python's default decoding is the
+            # ANSI one (1252) — a localized state word could otherwise make the
+            # decoder raise and lose the whole output.
             result = subprocess.run(
-                ["netstat", "-ano", "-p", "TCP"],
-                capture_output=True, text=True, timeout=10,
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                encoding="ascii",
+                errors="replace",
+                timeout=10,
             )
-            pattern = re.compile(
-                r"TCP\s+(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|::1):(\d+)\s+\S+\s+LISTENING",
-                re.IGNORECASE,
-            )
-        else:
+            return sorted(parse_netstat(result.stdout or ""))
+        if sys.platform == "darwin":
+            # macOS has no `ss`, so this branch used to run `ss`, fail, and
+            # find nothing: the scan never worked on a Mac. `netstat` ships
+            # with macOS and, unlike `lsof`, lists every user's sockets.
             result = subprocess.run(
-                ["ss", "-tlnH"], capture_output=True, text=True, timeout=5,
+                ["netstat", "-an", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                encoding="ascii",
+                errors="replace",
+                timeout=10,
             )
-            pattern = re.compile(r":(\d+)\s")
-        for line in result.stdout.splitlines():
-            m = pattern.search(line)
-            if m:
-                port = int(m.group(1))
-                if port > 1024:
-                    ports.add(port)
+            return sorted(parse_bsd_netstat(result.stdout or ""))
+        result = subprocess.run(
+            ["ss", "-tlnH"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+        return sorted(parse_ss(result.stdout or ""))
     except Exception as exc:  # noqa: BLE001 — discovery must never crash the caller
         logger.debug("port enumeration failed: %s", exc)
-    return sorted(ports)
+        return []
 
 
 @dataclass
@@ -118,13 +195,15 @@ async def _probe(
         return None
 
     entries = body.get("data") or []
-    ids = [e.get("id") for e in entries if isinstance(e, dict)]
+    ids = [e["id"] for e in entries if isinstance(e, dict) and isinstance(e.get("id"), str)]
     kind = await _identify(client, url)
     return Candidate(
         url=url,
         model_count=len(entries),
         kind=kind,
-        has_configured_model=bool(prefer_model) and prefer_model in ids,
+        # Suffix-insensitive: Foundry 0.10.3 lists `…-gpu` and answers to
+        # `…-gpu:2`, so an exact comparison flagged the right server as wrong.
+        has_configured_model=bool(prefer_model) and matches(prefer_model or "", ids),
     )
 
 
@@ -174,14 +253,17 @@ async def discover(
     best = sorted(candidates, key=Candidate.rank)[0]
     logger.info(
         "Discovered Foundry Local at %s (%d model(s) loaded, %s%s)",
-        best.url, best.model_count, best.kind,
+        best.url,
+        best.model_count,
+        best.kind,
         ", serving the configured model" if best.has_configured_model else "",
     )
     if not best.has_configured_model and prefer_model:
         logger.warning(
             "%s does not list the configured model %r — set an explicit backend URL "
             "if this is the wrong server.",
-            best.url, prefer_model,
+            best.url,
+            prefer_model,
         )
     return best.url
 

@@ -50,9 +50,7 @@ async def client():
 @pytest.mark.asyncio
 async def test_embeddings_are_proxied_verbatim(client):
     c, _, stub = client
-    r = await c.post(
-        "/v1/embeddings", json={"model": "stub-model", "input": "hello world"}
-    )
+    r = await c.post("/v1/embeddings", json={"model": "stub-model", "input": "hello world"})
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "list"
@@ -94,11 +92,15 @@ async def test_embeddings_are_admitted_against_the_token_budget(client):
 
 @pytest.mark.asyncio
 async def test_embeddings_usage_calibrates_the_estimator(client):
-    """Embedding responses carry real prompt counts too."""
+    """Embedding responses carry real prompt counts too — for the embedding model."""
+    from kvstream.tokenization import KIND_EMBEDDINGS
+
     c, gw, _ = client
-    assert gw.estimator.calibrated is False
+    assert gw.estimators.for_model("stub-model", KIND_EMBEDDINGS).calibrated is False
     await c.post("/v1/embeddings", json={"model": "stub-model", "input": "a" * 21})
-    assert gw.estimator.calibrated is True
+    assert gw.estimators.for_model("stub-model", KIND_EMBEDDINGS).calibrated is True
+    # An embedding tokenizer says nothing about the chat model's.
+    assert gw.estimator.calibrated is False
 
 
 @pytest.mark.asyncio
@@ -123,9 +125,7 @@ async def test_embeddings_reject_a_malformed_body(client):
 @pytest.mark.asyncio
 async def test_transcription_is_proxied_with_its_content_type(client):
     c, _, stub = client
-    r = await c.post(
-        "/v1/audio/transcriptions", files=AUDIO, data={"model": "stub-model"}
-    )
+    r = await c.post("/v1/audio/transcriptions", files=AUDIO, data={"model": "stub-model"})
     assert r.status_code == 200
     assert r.json()["text"] == "hello world"
 
@@ -159,7 +159,7 @@ async def test_transcription_uses_its_own_limiter_not_the_token_budget(client):
     c, gw, _ = client
     await c.post("/v1/audio/transcriptions", files=AUDIO, data={"model": "stub-model"})
     assert gw.capacity.in_flight == 0
-    assert gw.capacity.reclaimed == 0          # never went near the KV budget
+    assert gw.capacity.reclaimed == 0  # never went near the KV budget
     assert gw.audio_capacity.in_flight == 0
     assert gw.audio_capacity.unit == "concurrency"
 
@@ -221,6 +221,7 @@ async def test_status_reports_which_routes_are_proxied(client):
         "models": True,
         "embeddings": True,
         "transcriptions": True,
+        "completions": True,
     }
     assert body["audio_admission"]["unit"] == "concurrency"
 

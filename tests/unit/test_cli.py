@@ -66,14 +66,47 @@ def test_health_reports_an_unreachable_backend(monkeypatch):
         httpx,
         "get",
         lambda url, timeout=None: _FakeResponse(
-            {"status": "degraded", "backend_healthy": False,
-             "backend_url": "http://localhost:5273", "model": "phi-3-mini"}
+            {
+                "status": "degraded",
+                "backend_healthy": False,
+                "backend_url": "http://localhost:5273",
+                "model": "phi-3-mini",
+            }
         ),
     )
     result = runner.invoke(app, ["health"])
-    assert result.exit_code == 0
+    # Not serving is a failure a script must be able to see (it exited 0 before).
+    assert result.exit_code == 1
     assert "unreachable" in result.stdout
     assert "Foundry Local running" in result.stdout
+
+
+def test_health_does_not_call_a_stalled_backend_healthy(monkeypatch):
+    """
+    Answers /v1/models but cannot generate: the failure the readiness probe
+    exists for. This used to print "healthy" and exit 0.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda url, timeout=None: _FakeResponse(
+            {
+                "status": "degraded",
+                "backend_healthy": True,
+                "backend_reachable": True,
+                "backend_serving": False,
+                "backend_url": "http://127.0.0.1:63962",
+                "model": "m",
+                "hint": "The backend is reachable but not serving: no 1-token generation in 15s.",
+            }
+        ),
+    )
+    result = runner.invoke(app, ["health"])
+    out = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert "NOT serving" in out
+    assert "healthy" not in out.replace("healthy (serving)", "")
+    assert "no 1-token generation" in out  # the gateway's own hint
 
 
 def test_health_exits_nonzero_when_the_gateway_is_down(monkeypatch):
@@ -156,6 +189,14 @@ def test_calibrate_stores_a_budget_under_the_full_key(monkeypatch, tmp_path, cap
         async def health(self) -> bool:
             return True
 
+        async def detect_cli(self):
+            from kvstream.backend.foundry_cli import FoundryCli
+
+            return FoundryCli(path="foundry", version="0.10.3", generation="0.10.x")
+
+        async def models_or_none(self):
+            return None  # unreadable: the pre-sweep model check fails open
+
         async def chat(self, payload, headers=None):
             yield _Chunk()
 
@@ -168,11 +209,16 @@ def test_calibrate_stores_a_budget_under_the_full_key(monkeypatch, tmp_path, cap
         app,
         [
             "calibrate",
-            "--model", "phi-3-mini",
-            "--device", "npu",
-            "--max-concurrency", "2",
-            "--trials", "1",
-            "--warmup", "0",
+            "--model",
+            "phi-3-mini",
+            "--device",
+            "npu",
+            "--max-concurrency",
+            "2",
+            "--trials",
+            "1",
+            "--warmup",
+            "0",
             "--no-refine",
         ],
         env={"KVSTREAM_ADMISSION__CALIBRATION_STORE": str(store)},
@@ -185,6 +231,10 @@ def test_calibrate_stores_a_budget_under_the_full_key(monkeypatch, tmp_path, cap
     assert entry["model"] == "phi-3-mini"
     assert entry["device"] == "npu"
     assert entry["budget_tokens"] > 0
+    # Keyed by the detected runtime, as `serve` looks it up — it used to be
+    # "unknown|unknown", so a gateway could only ever find it as a partial match.
+    assert entry["cli_generation"] == "0.10.x"
+    assert entry["backend_version"] == "0.10.3"
 
 
 class _Chunk:
@@ -212,7 +262,7 @@ def test_bench_reports_latency(monkeypatch):
             return httpx.Response(200, json={"choices": []})
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-    result = runner.invoke(app, ["bench", "--total", "4", "--concurrency", "2"])
+    result = runner.invoke(app, ["bench", "--model", "m", "--total", "4", "--concurrency", "2"])
     assert result.exit_code == 0
     assert "KVStream Benchmark" in result.stdout
     assert "p99" in result.stdout
@@ -233,9 +283,57 @@ def test_bench_counts_errors(monkeypatch):
             return httpx.Response(503, json={"error": {"message": "overloaded"}})
 
     monkeypatch.setattr(httpx, "AsyncClient", FailingClient)
-    result = runner.invoke(app, ["bench", "--total", "3", "--concurrency", "3"])
+    result = runner.invoke(app, ["bench", "--model", "m", "--total", "3", "--concurrency", "3"])
     assert result.exit_code == 0
     assert "errors" in result.stdout
+
+
+def _status_returns(monkeypatch, model_info: dict) -> list[dict]:
+    """Make the gateway's /status report ``model_info``; record bench's requests."""
+    sent: list[dict] = []
+
+    def fake_get(url, timeout=None):
+        assert url.endswith("/status")
+        return httpx.Response(200, json={"model": model_info})
+
+    class RecordingClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+        async def post(self, url, json=None):
+            sent.append(json)
+            return httpx.Response(200, json={"choices": []})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "AsyncClient", RecordingClient)
+    return sent
+
+
+def test_bench_without_model_uses_the_model_the_gateway_resolved(monkeypatch):
+    sent = _status_returns(
+        monkeypatch,
+        {
+            "id": "Phi-3-mini-4k-instruct-generic-gpu:2",
+            "source": "auto-detected: the only model loaded",
+        },
+    )
+    result = runner.invoke(app, ["bench", "--total", "2", "--concurrency", "1"])
+    assert result.exit_code == 0
+    assert {p["model"] for p in sent} == {"Phi-3-mini-4k-instruct-generic-gpu:2"}
+
+
+def test_bench_without_model_refuses_when_the_gateway_has_none(monkeypatch):
+    sent = _status_returns(monkeypatch, {"id": None, "source": "undetermined: no model is loaded"})
+    result = runner.invoke(app, ["bench", "--total", "2"])
+    assert result.exit_code == 1
+    assert "no model is loaded" in result.stdout
+    assert sent == []  # nothing benchmarked against a made-up model
 
 
 # -- output encoding ----------------------------------------------------
@@ -243,7 +341,7 @@ def test_bench_counts_errors(monkeypatch):
 
 def test_output_is_widened_for_redirected_streams():
     """The Windows bug: cp1252 stdout could not encode the banner or the logs."""
-    cli_module._widen_output()   # must be safe to call repeatedly
+    cli_module._widen_output()  # must be safe to call repeatedly
     cli_module._widen_output()
 
 
@@ -251,3 +349,80 @@ def test_output_is_widened_for_redirected_streams():
 def test_every_command_has_help(command):
     result = runner.invoke(app, [command, "--help"])
     assert result.exit_code == 0
+
+
+def test_calibrate_refuses_an_unloaded_model_before_sweeping(monkeypatch, tmp_path):
+    """
+    Measured: with the model unloaded, the sweep failed with "Foundry Local is
+    unreachable … start it with `foundry server start`" — for a running server.
+    """
+    store = tmp_path / "calibration.json"
+    probes: list[dict] = []
+
+    class RunningButUnloaded:
+        model = None
+        base_url = "http://localhost:5273"
+
+        def __init__(self, **kwargs) -> None:
+            self.model = kwargs.get("model")
+
+        async def health(self) -> bool:
+            return True
+
+        async def detect_cli(self):
+            from kvstream.backend.foundry_cli import FoundryCli
+
+            return FoundryCli(path="foundry", version="0.10.3", generation="0.10.x")
+
+        async def models_or_none(self):
+            return ["Phi-3-mini-4k-instruct-generic-gpu"]  # downloaded...
+
+        async def chat(self, payload, headers=None):
+            probes.append(payload)
+            yield _Chunk()
+
+        async def aclose(self) -> None:
+            pass
+
+    async def nothing_loaded(cli, timeout=5.0):
+        return []  # ...but not loaded
+
+    monkeypatch.setattr("kvstream.backend.FoundryClient", RunningButUnloaded)
+    monkeypatch.setattr("kvstream.backend.foundry_cli.list_loaded", nothing_loaded)
+    result = runner.invoke(
+        app,
+        ["calibrate", "--model", "Phi-3-mini-4k-instruct-generic-gpu:2", "--warmup", "0"],
+        env={"KVSTREAM_ADMISSION__CALIBRATION_STORE": str(store)},
+    )
+    out = " ".join(result.stdout.split())  # Rich wraps long lines
+    assert result.exit_code == 1
+    assert "not loaded" in out
+    assert "foundry model load" in out
+    assert "server start" not in out
+    assert probes == []  # no sweep was sent
+    assert not store.exists()
+
+
+def test_health_waits_longer_than_the_readiness_probe(monkeypatch):
+    """The gateway's probe may take up to 15 s; a 5 s client timed out first."""
+    seen: dict = {}
+
+    def get(url, timeout=None):
+        seen["timeout"] = timeout
+        return _FakeResponse({"status": "ok", "backend_serving": True})
+
+    monkeypatch.setattr(httpx, "get", get)
+    assert runner.invoke(app, ["health"]).exit_code == 0
+    assert seen["timeout"] > 15
+
+
+def test_a_health_timeout_is_not_reported_as_unreachable(monkeypatch):
+    def slow(url, timeout=None):
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(httpx, "get", slow)
+    result = runner.invoke(app, ["health", "--timeout", "2"])
+    out = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert "did not answer within 2s" in out
+    assert "Cannot reach" not in out

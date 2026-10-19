@@ -86,10 +86,10 @@ def test_learning_makes_estimates_move_toward_truth():
 
 def test_observe_rejects_implausible_samples():
     est = TokenEstimator(4.0)
-    est.observe(chars=0, units=0, actual_prompt_tokens=10)      # nothing to learn from
-    est.observe(chars=100, units=20, actual_prompt_tokens=0)    # no tokens
-    est.observe(chars=100, units=90, actual_prompt_tokens=1)    # 100 chars/token — absurd
-    est.observe(chars=10, units=1, actual_prompt_tokens=100)    # 0.1 chars/token — absurd
+    est.observe(chars=0, units=0, actual_prompt_tokens=10)  # nothing to learn from
+    est.observe(chars=100, units=20, actual_prompt_tokens=0)  # no tokens
+    est.observe(chars=100, units=90, actual_prompt_tokens=1)  # 100 chars/token — absurd
+    est.observe(chars=10, units=1, actual_prompt_tokens=100)  # 0.1 chars/token — absurd
     assert est.samples == 0
     assert est.chars_per_token == 4.0
 

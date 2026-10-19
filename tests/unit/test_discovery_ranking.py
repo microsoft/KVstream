@@ -51,9 +51,7 @@ def _fake_network(monkeypatch, ports: dict[int, dict]):
             return httpx.Response(200, json={"object": "list", "data": data}, headers=headers)
         return httpx.Response(404)
 
-    monkeypatch.setattr(
-        discovery, "list_listening_ports", lambda: sorted(ports.keys())
-    )
+    monkeypatch.setattr(discovery, "list_listening_ports", lambda: sorted(ports.keys()))
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 

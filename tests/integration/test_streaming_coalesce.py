@@ -80,7 +80,7 @@ async def test_a_follower_replays_what_it_missed_then_tracks_the_leader():
 
     task = asyncio.create_task(follow())
     await asyncio.sleep(0)
-    assert seen == [b"one", b"two"]      # joined late, saw the whole thing
+    assert seen == [b"one", b"two"]  # joined late, saw the whole thing
 
     b.publish(b"three")
     await asyncio.sleep(0)
@@ -93,7 +93,7 @@ async def test_a_follower_replays_what_it_missed_then_tracks_the_leader():
 async def test_a_slow_follower_never_blocks_the_leader():
     b = StreamBroadcast()
     for i in range(1000):
-        b.publish(str(i).encode())      # publishing never awaits
+        b.publish(str(i).encode())  # publishing never awaits
     b.close()
     assert b.done is True
 
@@ -127,7 +127,7 @@ async def test_identical_concurrent_streams_hit_the_backend_once(client):
     c, _, stub = client
     bodies = await asyncio.gather(*[_stream(c) for _ in range(5)])
 
-    assert stub.stream_calls == 1                      # one upstream call
+    assert stub.stream_calls == 1  # one upstream call
     assert all(_text_of(b) == "Hello, world!" for b in bodies)
     assert all(b.rstrip().endswith("data: [DONE]") for b in bodies)
 
@@ -138,7 +138,7 @@ async def test_followers_consume_no_budget(client):
     c, gw, _ = client
     await asyncio.gather(*[_stream(c) for _ in range(5)])
     assert gw.capacity.in_flight == 0
-    assert gw.capacity.stats()["queue"]["admitted"] == 0   # nobody even queued
+    assert gw.capacity.stats()["queue"]["admitted"] == 0  # nobody even queued
 
 
 @pytest.mark.asyncio
@@ -153,8 +153,8 @@ async def test_a_coalesced_response_says_so(client):
 
     results = await asyncio.gather(*[headers_of() for _ in range(4)])
     assert stub.stream_calls == 1
-    assert results.count(None) == 1          # the leader
-    assert results.count("1") == 3           # the followers
+    assert results.count(None) == 1  # the leader
+    assert results.count("1") == 3  # the followers
 
 
 @pytest.mark.asyncio
@@ -189,8 +189,11 @@ async def test_non_deterministic_streams_are_never_coalesced(client):
 @pytest.mark.asyncio
 async def test_no_store_skips_the_cache_in_both_directions():
     app, _, stub = _app(enabled=True)
-    body = {"model": "stub-model", "messages": [{"role": "user", "content": "x"}],
-            "temperature": 0.0}
+    body = {
+        "model": "stub-model",
+        "messages": [{"role": "user", "content": "x"}],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
         await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
@@ -202,38 +205,46 @@ async def test_no_store_skips_the_cache_in_both_directions():
 @pytest.mark.asyncio
 async def test_no_cache_refetches_but_still_refreshes_the_entry():
     app, _, stub = _app(enabled=True)
-    body = {"model": "stub-model", "messages": [{"role": "user", "content": "x"}],
-            "temperature": 0.0}
+    body = {
+        "model": "stub-model",
+        "messages": [{"role": "user", "content": "x"}],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        await c.post("/v1/chat/completions", json=body)                       # miss, stores
-        await c.post("/v1/chat/completions", json=body,
-                     headers={"Cache-Control": "no-cache"})                   # forced refetch
-        await c.post("/v1/chat/completions", json=body)                       # hit
+        await c.post("/v1/chat/completions", json=body)  # miss, stores
+        await c.post(
+            "/v1/chat/completions", json=body, headers={"Cache-Control": "no-cache"}
+        )  # forced refetch
+        await c.post("/v1/chat/completions", json=body)  # hit
     assert stub.once_calls == 2
 
 
 @pytest.mark.asyncio
 async def test_the_kvstream_header_works_too():
     app, _, stub = _app(enabled=True)
-    body = {"model": "stub-model", "messages": [{"role": "user", "content": "x"}],
-            "temperature": 0.0}
+    body = {
+        "model": "stub-model",
+        "messages": [{"role": "user", "content": "x"}],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
-        await c.post("/v1/chat/completions", json=body,
-                     headers={"x-kvstream-cache": "no-store"})
+        await c.post("/v1/chat/completions", json=body, headers={"x-kvstream-cache": "no-store"})
     assert stub.once_calls == 2
 
 
 @pytest.mark.asyncio
 async def test_request_headers_can_be_ignored_by_policy():
     app, _, stub = _app(enabled=True, respect_request_headers=False)
-    body = {"model": "stub-model", "messages": [{"role": "user", "content": "x"}],
-            "temperature": 0.0}
+    body = {
+        "model": "stub-model",
+        "messages": [{"role": "user", "content": "x"}],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
-        await c.post("/v1/chat/completions", json=body,
-                     headers={"Cache-Control": "no-store"})
-    assert stub.once_calls == 1          # the directive was not honoured
+        await c.post("/v1/chat/completions", json=body, headers={"Cache-Control": "no-store"})
+    assert stub.once_calls == 1  # the directive was not honoured
 
 
 @pytest.mark.asyncio
@@ -241,8 +252,11 @@ async def test_an_oversized_response_is_not_cached():
     """One huge entry can evict everything useful; skipping it is better."""
     app, _, stub = _app(enabled=True, max_entry_bytes=1024)
     stub.reply = "x" * 50_000
-    body = {"model": "stub-model", "messages": [{"role": "user", "content": "x"}],
-            "temperature": 0.0}
+    body = {
+        "model": "stub-model",
+        "messages": [{"role": "user", "content": "x"}],
+        "temperature": 0.0,
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         await c.post("/v1/chat/completions", json=body)
         await c.post("/v1/chat/completions", json=body)

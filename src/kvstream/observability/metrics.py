@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
+# Prometheus' default buckets stop at 10 s. A local generation, a long stream or
+# an admission wait (up to `admission_timeout_seconds`, 120 s by default) is
+# routinely longer, so everything interesting landed in +Inf and no percentile
+# above 10 s could be read. These reach 10 minutes.
+REQUEST_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600)
+WAIT_BUCKETS = (0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600)
+
 
 class Metrics:
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
@@ -19,7 +26,8 @@ class Metrics:
             "kvstream_requests_total",
             "Requests by proxied route and outcome.",
             # route: chat | embeddings | transcriptions
-            # outcome: served | cache_hit | coalesced | rejected | error
+            # outcome: served | cache_hit | coalesced | rejected | error |
+            #          client_error | abandoned | cache_miss — one per request
             ["route", "outcome"],
             registry=self.registry,
         )
@@ -39,19 +47,22 @@ class Metrics:
             registry=self.registry,
         )
         self.coalesced = Counter(
-            "kvstream_coalesced_total", "Requests served by a coalesced leader.",
+            "kvstream_coalesced_total",
+            "Requests served by a coalesced leader.",
             registry=self.registry,
         )
         self.latency = Histogram(
             "kvstream_request_seconds",
             "End-to-end request latency (seconds) by route.",
             ["route"],
+            buckets=REQUEST_BUCKETS,
             registry=self.registry,
         )
         self.admission_wait = Histogram(
             "kvstream_admission_wait_seconds",
             "Time spent waiting for admission, by route.",
             ["route"],
+            buckets=WAIT_BUCKETS,
             registry=self.registry,
         )
         self.backend_errors = Counter(
@@ -62,8 +73,10 @@ class Metrics:
         )
         self.overshoot = Counter(
             "kvstream_reservation_overshoot_total",
-            "Times a generation outgrew its admitted reservation and was topped up. "
-            "Always zero while admission.reserve_completion_ratio is 1.0.",
+            "Times a generation outgrew its admitted reservation and was topped up: "
+            "below admission.reserve_completion_ratio 1.0, or with "
+            "admission.apply_default_max_tokens off, when a request set no limit and "
+            "generated past admission.default_max_tokens.",
             registry=self.registry,
         )
         self.reclaimed = Counter(
@@ -122,13 +135,12 @@ class Metrics:
         )
         self.drift_ratio = Gauge(
             "kvstream_backend_drift_ratio",
-            "Served seconds-per-token relative to the calibration baseline; "
-            "0 when unknown.",
+            "Served seconds-per-token relative to the calibration baseline; 0 when unknown.",
             registry=self.registry,
         )
         self.backend_up = Gauge(
             "kvstream_backend_up",
-            "1 when the last backend health probe succeeded, 0 otherwise.",
+            "Last known backend reachability (startup, /health, completed requests): 1 up, 0 down.",
             registry=self.registry,
         )
         # Audio is admitted on its own plain concurrency limit: a sound file has

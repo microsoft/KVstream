@@ -23,7 +23,10 @@ drain_timeout_seconds: 30.0   # on shutdown: turn away the queue, let in-flight 
 
 backend:
   base_url: http://localhost:5273   # starting guess; auto-discovered if wrong
-  model: phi-3-mini                 # a model id returned by Foundry's /v1/models
+  # The model KVStream itself probes and calibrates against (requests name their
+  # own). Omit to auto-detect: used when exactly one model is loaded, reported
+  # as undetermined otherwise. Set it when several models are loaded.
+  # model: Phi-3-mini-4k-instruct-generic-gpu:2
   timeout_seconds: 120.0
   discover: true                    # auto-discover Foundry Local's ephemeral port
   discovery_cooldown_seconds: 5.0   # min gap between full localhost scans
@@ -41,6 +44,9 @@ backend:
   foundry_cli_timeout_seconds: 5.0
   # api_key: sk-...              # static bearer token sent upstream (rarely needed)
   forward_authorization: true    # pass the caller's Authorization header through
+  # Neither the key nor a caller's header is sent to a backend found only by
+  # scanning localhost; set base_url (or let the foundry CLI report it) if the
+  # backend needs them.
 
   # Readiness. Answering /v1/models proves a process is alive, not that it can
   # generate a token — measured against a real Foundry Local that served
@@ -49,6 +55,9 @@ backend:
   probe_readiness: true
   readiness_interval_seconds: 30.0
   readiness_timeout_seconds: 15.0
+  # /health?probe=true forces a fresh probe, but not more often than this: the
+  # probe is a generation outside the admission budget.
+  readiness_force_min_interval_seconds: 5.0
 
   # Circuit breaker. Without it a stalled backend is rediscovered one request at
   # a time: each arrival waits the full backend timeout and the admission queue
@@ -73,14 +82,20 @@ admission:
   chars_per_token: 4.0              # starting ratio; refined at runtime
   learn_token_ratio: true           # learn the true ratio from backend usage
   token_safety_factor: 1.0          # >1.0 buys headroom against under-estimation
-  # Fraction of max_tokens reserved up front. 1.0 reserves the worst case and can
-  # never breach the budget. Lower values reserve less and reclaim live, but a
+  # Fraction of max_tokens reserved up front. 1.0 reserves the worst case and
+  # holds the budget (unless apply_default_max_tokens is off and a request sets no
+  # limit). Lower values reserve less and reclaim live, but a
   # generation that outgrows its reservation is topped up rather than truncated —
   # tune against kvstream_reservation_overshoot_total, not by guesswork.
   reserve_completion_ratio: 1.0
-  # Generation length assumed when a request omits max_tokens. Used only to cost
-  # the request — it is never sent upstream, so the model's own default applies.
+  # max_tokens for a request that sets neither max_tokens nor max_completion_tokens
+  # (`kvstream serve --max-tokens N`). It is what the request is costed at and,
+  # while apply_default_max_tokens is on, what is sent upstream, so the request
+  # cannot generate past what it was admitted for. A limit the client sets is
+  # never changed. With apply_default_max_tokens off nothing is added: the model's
+  # own default applies and the request can exceed its admitted cost.
   default_max_tokens: 512
+  apply_default_max_tokens: true
   # Warn when served latency per token exceeds the calibration-time baseline by
   # this factor. A budget measured on a fresh runtime stops describing one that
   # has degraded — and on real hardware, nothing else noticed.

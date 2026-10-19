@@ -11,6 +11,368 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — `kvstream serve --max-tokens`, 2026-10-20
+
+- **A request that sets no generation limit is now sent one.** `kvstream serve
+  --max-tokens N` (config `admission.default_max_tokens`, default **512**) is sent
+  upstream as `max_tokens` for any chat or legacy-completions request that sets
+  neither `max_tokens` nor `max_completion_tokens`. It was already the length such
+  a request was *costed* at, but it was never sent, so the request could generate
+  up to the model's own limit and exceed the budget it was admitted on. A limit the
+  client sets is forwarded unchanged, even if larger.
+- **Behaviour change:** clients that relied on the model's own default length now
+  get 512 tokens unless they set a limit. `admission.apply_default_max_tokens:
+  false` restores the previous behaviour.
+- Verified live against Foundry Local 0.10.3 with `--max-tokens 20`: a request with
+  no limit returned 20 completion tokens (`finish_reason: length`), streamed and
+  non-streamed; a request setting `max_tokens: 40` returned 40; with the setting off
+  the same request returned 512; token mode recorded 0 overshoots. Tests in
+  `tests/integration/test_review4_fixes.py` (6 mutation checks).
+
+### Fixed — live accounting, and a second README truthfulness pass, 2026-10-20
+
+- **A running stream keeps its reservation until it finishes.** Live accounting
+  settled a stream every 16 tokens to what it had generated *so far*, handing back
+  the rest of its reservation while it still needed it (48 of 64 tokens at token
+  16, measured); other requests could be admitted into that headroom, and the
+  stream then grew back past it — exceeding the budget at the default
+  `reserve_completion_ratio` of 1.0 and counting overshoots. The reservation is now
+  held while generating and settled to actual use once the generation finishes.
+  Regression test and mutation check in `tests/integration/test_review4_fixes.py`.
+- **"At the default 1.0 overshoot is impossible" was false**, in the README, the
+  metric's help text, a docstring and a config comment, even after that fix: a
+  request that omits `max_tokens` is costed at `admission.default_max_tokens` and
+  can generate more. Now stated, with a test.
+- **README corrected where it did not match the code or the stored evidence:**
+  the modelled-runtime "held at 5 concurrent" result came from the calibration
+  bisection bug fixed earlier today, and re-runs give different budgets (now
+  stated, with the re-run numbers); a stored token-mode real-hardware run exists
+  that the README said did not (described, with its caveats); the calibrated
+  estimator's worst under-count is 16%, not 18%; a mid-stream backend failure is an
+  error event, not a 502; `/health` 503 does not always mean requests will fail;
+  model auto-detection does infer a model when no CLI is available; admission and
+  shedding claims reworded to what the code does; Docker caveats added (Foundry
+  Local binds loopback; image environment variables override a mounted config).
+
+### Fixed — embeddings for a chat model, and README accuracy, 2026-10-20
+
+- **Embeddings requests naming a chat model are refused, not forwarded.** On
+  Foundry Local CLI 0.10.3 such a request was followed, both times it was tried,
+  by the service stopping for every client. KVStream now reads each model's
+  `type` from the same `foundry cache list --output json` call that reports what
+  is loaded, and answers `400` (`model_not_embedding`) for a model of type `Chat`
+  before admission, without contacting Foundry Local. Verified live: refused in
+  7 ms, Foundry Local still serving afterwards. Fails open where the type cannot
+  be read (no CLI, containers). `/status` shows the types under
+  `model.inventory.types`. Tests in `tests/integration/test_review4_fixes.py`
+  (5 mutation checks).
+- **README and user guide corrected.** The install step `cd KVstream/kvstream-foundry`
+  named a directory that does not exist. Both said the 0.10.x CLI path was never
+  tested; it has been exercised live against 0.10.3, and the docs now say what was
+  run against which generation (and that 0.8.x has not been re-run since). Both
+  implied Foundry Local returns no `usage`; 0.10.3 does. "Clients cannot route
+  around the gateway" now says what it means (Foundry Local stays reachable
+  directly). Added the 0.10.3 calibration result, `only-if-cached`, and the
+  architecture and user-guide documents to the documentation table.
+
+### Fixed — fourth code review (whole codebase), 2026-10-20
+
+Each fix has a regression test in `tests/integration/test_review4_fixes.py` that
+fails with its bug re-introduced (22 mutation checks).
+
+- **Calibration no longer stores an inflated budget.** Bisection judged a point
+  healthy against the last healthy point instead of the sweep's first, so it could
+  accept up to `latency_ratio`² times the baseline (3.5x was accepted against a 2x
+  limit) and B was computed from it.
+- **An auto-detected model follows a model swap.** It was kept forever, so after
+  unloading it and loading another, `/health` probed a model that was not loaded and
+  reported "not serving" until a restart. A configured `--model` is never replaced.
+- **`docker-compose.yml` works with Foundry Local 0.10.x.** It shipped port 5273 and
+  the catalog alias `phi-3-mini`, which the inference API refuses (HTTP 400). The URL
+  now comes from a required `FOUNDRY_URL`, the model from optional `KVSTREAM_MODEL`.
+- **Removed `docker-compose.gpu.yml`.** It reserved a GPU for the proxy, which runs
+  no model, and overrode an `ollama` service the base file does not define.
+- **The container healthcheck outlasts the readiness probe.** It allowed 4 s while
+  `/health` can run a generation of up to `readiness_timeout_seconds` (15 s), marking
+  a serving gateway unhealthy whenever the probe was slow.
+- **One outcome per streamed request in `kvstream_requests_total`.** `served` was
+  counted at the first token, so an abandoned stream counted twice and a stream that
+  failed part-way counted as served. It is now `served`, `abandoned` or `error`.
+- **Latency histograms reach 10 minutes.** The default buckets stopped at 10 s, so
+  generations and admission waits all fell in `+Inf`. *The bucket boundaries of
+  `kvstream_request_seconds` and `kvstream_admission_wait_seconds` changed;
+  dashboards using `le` labels need updating.*
+- **`kvstream_backend_drift_ratio` never reports a stale value.** It was only set
+  when non-zero, so it kept the old ratio after the drift monitor was reset.
+- **A malformed `measured_at` in the calibration store no longer stops the gateway
+  starting** (`TypeError` while choosing the newest record).
+- **Token estimators are per model and per route.** One estimator learned every
+  model's tokenizer at once, and embedding usage trained the chat estimator. Each
+  (route, model) now learns separately, bounded at 64; drift detection observes only
+  the calibrated model. `/status` adds `token_estimators`.
+- **A timeout during calibration no longer labels the runtime "capped".** Only
+  refusals do; a serialising runtime under load times out, which is not a cap.
+- **Estimated `usage` no longer includes `token_safety_factor`**, which is admission
+  headroom, not a count.
+- **A different model build is a partial calibration match.** `…-gpu:1` matched a
+  record for `…-gpu:2` exactly and silently inherited its budget.
+- **`kvstream bench`** rejects `--total 0` (was an `IndexError`) and reports
+  latency for successful requests only.
+- **`/status` lists the `completions` route.**
+
+### Fixed — third code review, 2026-10-20
+
+Each fix has a regression test (`tests/integration/test_review3_fixes.py`, and
+`tests/unit/test_backend_health.py` for the probe limit) that fails with its bug
+re-introduced (14 mutation checks).
+
+- **Environment variables now override `kvstream.yaml`, as documented.** The file
+  was passed as constructor arguments, which outrank every settings source, so
+  `KVSTREAM_PORT=9000` lost to `port: 8080` in YAML. The file is now a settings
+  source ranked below the environment.
+- **A missing `--config` file is an error.** It was silently skipped and the gateway
+  ran on defaults. A missing, non-mapping or invalid file now exits with code 2 and
+  says why. The implicit `kvstream.yaml` in the working directory stays optional.
+- **`/v1/models/{id}` sends the id as one encoded path segment.** A decoded `?`
+  started a query string upstream and `..` was normalised to another endpoint;
+  dot segments are now answered 404 without contacting the backend.
+- **A readiness probe that runs out of time says so.** On Python 3.10
+  `asyncio.TimeoutError` is not the builtin `TimeoutError`, and on any version the
+  HTTP client's read timeout could fire first; both were reported as the backend
+  having "rejected" the generation.
+- **Audio uploads are bounded while they arrive.** A chunked upload (no
+  `Content-Length`) was spooled in full and read into memory before the size check.
+  The body is now counted as it is received, an oversized file is refused before
+  admission, the file is read into memory only after admission (so at most
+  `audio_max_concurrency` are held at once), and the parsed form is closed so its
+  temporary files are removed.
+- **Credentials are not sent to a backend found by the localhost scan.** The scan
+  adopts any server answering `/v1/models`; `backend.api_key` and forwarded
+  `Authorization` headers now go only to a configured URL or one the `foundry` CLI
+  reported. Foundry Local needs no auth, so a scanned Foundry Local is unaffected.
+- **`/health?probe=true` is rate-limited.** Each forced probe is a generation outside
+  the admission budget; forcing now honours
+  `backend.readiness_force_min_interval_seconds` (default 5 s, never longer than
+  `readiness_interval_seconds`).
+- **Shutdown stops the gateway's own streams before closing the HTTP client.** After
+  the drain timeout they kept running, failed against the closed client and were
+  counted as backend failures. They are now cancelled and awaited; their clients get
+  an error frame, never `[DONE]`.
+
+### Fixed — second code review, 2026-10-11
+
+Each fix has a regression test (`tests/integration/test_review2_fixes.py`, and
+`tests/unit/test_cli.py` for the CLI) that fails with its bug re-introduced.
+
+- **A model loaded after start-up no longer strands queued requests.** When the model
+  was auto-detected later and a calibrated budget applied, the capacity manager was
+  replaced while requests were in flight. They released into the new manager, the
+  old one's queue never moved, and a queued request was refused after its full
+  timeout (measured: 503 after 6 s, with capacity free after 2 s). A new budget now
+  waits for an idle moment (nothing reserved, nothing queued, not shutting down) and
+  is installed at admission time. Requests are costed by the manager they enter,
+  never in one unit and charged in another. `/status` shows a waiting budget as
+  `budget_pending`. Under unbroken load the previous limit stays in force until the
+  first idle moment.
+- **Streamed responses are cached with coalescing off.** The cache used the
+  coalescing key, which does not exist when coalescing is disabled. (A regression
+  from making streams gateway-owned.)
+- **`kvstream health` reports serving, not liveness, and exits 1 unless serving.** It
+  called a backend that answered `/v1/models` but could not generate "healthy" and
+  exited 0. It now prints the gateway's hint, waits 30 s by default (`--timeout`)
+  rather than 5 s, because the readiness probe can legitimately take most of 15 s,
+  and says it timed out rather than that the gateway is unreachable.
+- **`GET /v1/models` returns 502 when Foundry Local cannot be read**, not `200` with
+  an empty list.
+- **`Cache-Control: only-if-cached` returns 504 on a miss** (RFC 9111) instead of
+  calling the backend.
+- **Server errors on embeddings, legacy completions and transcription count toward
+  the circuit breaker**, and a success counts too, as on chat. 501 (Not Implemented)
+  is excluded, because it describes the route, not the backend's health.
+- **No retry against a URL rediscovery did not find.** During the rediscovery
+  cooldown, a refused request was retried at the configured fallback URL, and the
+  error named that URL.
+- **A failed start-up still reports the admission budget.** The provisional
+  resolution is silent, so a missing token budget went unreported if start-up
+  raised.
+
+### Fixed — CI, 2026-10-11
+
+- **The CI workflow can pass, and covers every platform KVStream supports.** It
+  ran on Linux only and could not pass: lint and mypy pointed at `kvstream/` (the
+  code is in `src/kvstream/`), `pytest --cov` needed `pytest-cov`, which was not a
+  dependency (now added to `dev`), and `ruff format --check` failed on 44 files. It
+  now runs on Linux, Windows and macOS, Python 3.10 and 3.12 (plus 3.11 on Linux),
+  and can be triggered manually. The steps pass in a fresh Windows virtualenv; the
+  Linux and macOS jobs have not run yet.
+- **The code is formatted with `ruff format`** (44 files, whitespace and wrapping
+  only; the full suite, lint and mypy are unchanged).
+
+### Fixed — found during live verification, 2026-10-11
+
+- **Foundry CLI output is decoded as UTF-8.** It was decoded with the locale code
+  page (cp1252 on Windows). Measured: `foundry model load` prints `● success`, the
+  decoder thread raised on the `●`, the whole output was lost, and KVStream received
+  the text `"None"`. The CLI commands KVStream relies on print JSON that has been
+  plain ASCII so far, so this had not failed in practice. Any non-ASCII character
+  would have made their output silently disappear.
+- **"Unreachable" now means unreachable.** Every network failure used to be
+  reported as "Foundry Local is unreachable … start it with `foundry server start`",
+  including a running server that dropped the connection mid-request. Foundry 0.10.3
+  does exactly that for a streamed request naming an unloaded model. Only a refused
+  connection now gets that message. A timeout says it timed out, and a dropped
+  connection says the server is running and to check the model is loaded.
+- **The localhost port scan works on non-English Windows, and finds IPv6-only
+  listeners.** It found listening ports by matching the word `LISTENING`, which
+  Windows localizes. It now recognises a listener by structure (a wildcard foreign
+  address, `0.0.0.0:0` or `[::]:0`) and never reads the state column. It also used
+  `netstat -p TCP`, which lists IPv4 only, so a backend bound to `[::1]` was never
+  found; on the development machine the new scan finds two such listeners the old
+  one missed. Output is decoded as ASCII with replacement: netstat writes the OEM
+  code page (437 here) and Python's default is the ANSI one (1252), so a
+  localized word could have crashed the decoder. Tested with real captured output
+  re-rendered in localized forms, and live with the CLI lookup disabled. Not tested
+  on an actual non-English Windows install.
+- **The localhost port scan works on macOS.** Every non-Windows platform ran `ss`,
+  which macOS does not have, so on a Mac the scan always found nothing and
+  discovery depended entirely on the `foundry` CLI or a pinned URL. macOS now runs
+  `netstat -an -p tcp` and parses the BSD format (`address.port`, wildcard foreign
+  address `*.*`). The parser is tested against a documented macOS sample, and a
+  platform-independent test opens a real listening socket and requires the scan to
+  find it. **Not yet run on a Mac:** that test has passed on Windows only; the
+  macOS CI job (see "Fixed — CI") will be its first run on a Mac.
+- **`calibrate` checks the model is loaded before sweeping.** With the model
+  unloaded it now says so ("downloaded but not loaded … `foundry model load`"),
+  sends no probes and saves nothing.
+
+### Fixed — code review, 2026-10-11
+
+Each fix has a regression test in `tests/integration/test_review_fixes.py`. Each test
+was checked to *fail* with its bug re-introduced, and to pass with the fix.
+
+- **Shutdown drains when shutdown starts.** Uvicorn waits for open connections
+  before the lifespan shutdown hook, and a queued request is an open connection.
+  Measured: a request queued at Ctrl+C was served after waiting for its slot, and
+  `drain_timeout_seconds` bounded nothing. `GatewayServer` now turns queued requests
+  away at once (503), and `drain_timeout_seconds` is uvicorn's graceful-shutdown
+  timeout. Work still running at the deadline is cancelled, which uvicorn reports as
+  HTTP 500. Also fixed underneath: a request queued while the queue was drained was
+  treated as admitted, with no reservation.
+- **No backend probe before every request.** With discovery on (the default), each
+  request first sent `GET /v1/models`, doubling upstream traffic. The resolved URL is
+  now trusted until a connection is refused. The backend is then re-discovered and
+  the request retried once; a refused connection never reached a server, so the
+  retry cannot duplicate work.
+- **`calibrate` fails instead of saving a non-measurement.** When every probe
+  failed (e.g. the model was not loaded) it saved the smallest probe size as the
+  budget and reported success. It now exits non-zero, gives the reason, and
+  saves nothing.
+- **Calibration records are found.** `calibrate` labelled records with `unknown`
+  for the CLI generation and Foundry version, which `serve` never looks up. It now
+  records the detected values, and connects exactly as `serve` does. A record is
+  found with or without the model's `:N` suffix, and the newest of several
+  matches wins (it used to be whichever was stored first).
+- **Token-mode predictive shedding works.** It compared queue *length* with a
+  *token* budget, so it could never fire. The drain rate is now also counted in
+  admitted-cost units, the same unit as the queue it is divided into. The live run
+  then showed a second half of the same bug: "saturated" meant `in_flight >= budget`,
+  which a 70-token request against a 96-token budget never reaches, although
+  nothing else fits. Saturation now means *the waiting request does not fit*.
+  Measured live (30 concurrent requests, 3 s timeout): 20 refused on predicted wait,
+  16 of them within 0.1 s of arriving, where before all were refused only after
+  the full 3 s.
+- **No false budget warnings at token-mode startup.** The budget was resolved once
+  before the CLI version and model were known, which logged "no budget calibrated
+  … falling back" or "different environment" just before the real, exact
+  resolution. That provisional pass is now silent, and startup always reports
+  its own result.
+- **Coalescing and the cache separate callers.** The forwarded `Authorization`
+  credential is now part of the key. Before, two callers sending the same body
+  shared one upstream call made with the first caller's credentials.
+- **Streamed legacy completions stream.** `/v1/completions` with `stream: true` is
+  relayed as a stream; it used to return HTTP 200 with an error object. A non-JSON
+  body with a success status is now a 502.
+- **Drift compares like with like.** The baseline is now the median seconds per
+  processed token at the knee, time to first token included, which is how live
+  samples are taken (streamed samples previously excluded time to first token). It
+  is stored as `baseline_seconds_per_token`. Older records leave drift inactive
+  until re-calibrated, rather than reporting a meaningless ratio.
+- **The token estimator learns from text tokens.** It attributed the chat
+  template's per-message tokens to the text, then added them again when estimating.
+- **Streamed chat is timed** in `kvstream_request_seconds`. **`kvstream_backend_up`**
+  reflects the last known state (startup, `/health`, completed requests); it used
+  to change only when `/health` was called.
+- **The calibration store is written atomically**, so a crash mid-write no longer
+  wipes it. A non-numeric value is skipped rather than crashing startup.
+- **Calibration counts generated tokens**, not `max_tokens`. A model that stopped
+  early inflated throughput and skewed the serialising/batching verdict.
+- **Discovery matches the configured model with or without its `:N` suffix**,
+  ending a false "does not list the configured model" warning on CLI 0.10.3.
+
+### Changed — `--model` is optional
+
+- **The model is auto-detected when exactly one is loaded.** `serve` and
+  `calibrate` adopt it and log `model: <id> (auto-detected: …)`. `bench` uses the
+  model the running gateway resolved. Nothing is guessed: with no model or several
+  models loaded, KVStream logs why, keeps forwarding requests (each names its own
+  model), and `/health` reports not ready with the reason until a model is
+  determined. A model loaded later is picked up by the next health check.
+  `/health` and `/status` report the model and how it was determined.
+- **The default `backend.model` is now unset** instead of `phi-3-mini`, an id
+  Foundry Local rejects. Leaving it out used to make the readiness probe fail,
+  so `/health` reported a working backend as not serving.
+- **New `backend/inventory.py`** tracks downloaded models (`/v1/models`) and loaded
+  models (`foundry cache list --output json`) separately. Measured on CLI 0.10.3:
+  `/v1/models` keeps listing a model after it is unloaded.
+
+### Fixed — streams for an unloaded model
+
+- **A streamed request for a downloaded-but-unloaded model is a 400
+  `model_not_loaded`, not a backend failure.** Foundry 0.10.3 answers it with
+  `200 text/event-stream` and a dropped connection. The earlier check used only
+  `/v1/models`, which still lists unloaded models, so these counted against the
+  circuit breaker. A stream that fails before its first token now re-reads the
+  inventory before blaming the backend, which covers an unload inside the 30 s
+  cache window.
+
+### Fixed — failure semantics (docs/ARCHITECTURE.md §9, §13)
+
+Each fix has a regression test in `tests/integration/test_failure_semantics.py` and
+was checked live against Foundry Local CLI 0.10.3 (ARCHITECTURE §19).
+
+- **A backend 4xx no longer trips the circuit breaker or becomes a 502.** Chat
+  requests naming a wrong model alias returned 502 and counted as backend failures,
+  so five of them opened the breaker for every caller. `FoundryClientError` now
+  carries the backend's status and body through to the client.
+- **Streamed requests for a model Foundry does not serve get a 400.** Foundry
+  0.10.3 answers them with `200 text/event-stream` and a dropped connection, which
+  looked like a crash. The model is checked against `/v1/models` before dispatch
+  (`:N` suffix ignored, fails open).
+- **A wrong model alias no longer switches off usage reporting** for the whole
+  process. `stream_options` is treated as rejected only if the retry without it is
+  accepted.
+- **A half-open breaker trial is always resolved.** A trial refused by admission,
+  answered with a client error, or cancelled used to hold the breaker half-open,
+  refusing every request.
+- **Coalescing cancellation no longer crosses between callers.** A cancelled
+  non-streaming leader stranded its followers, and one follower's cancellation
+  could cancel the shared result.
+- **Streams are owned by the gateway.** When the client that started a coalesced
+  stream disconnected, followers received a truncated response ending in `[DONE]`.
+  Generations now run as gateway-owned tasks: `[DONE]` is sent only for a complete
+  response, and the upstream call is cancelled when the last client leaves.
+- **The startup model check is now based on what the inference API accepts.** It
+  used to compare the configured id with `foundry model list` exactly. On CLI 0.10.3
+  that falsely warned about a loaded model (the catalog lists `…:2`, `/v1/models`
+  lists the id without the suffix), and never warned about a catalog alias such as
+  `phi-3-mini-4k`, which the API rejects with 400. It now checks `/v1/models` first,
+  ignores a `:N` suffix, and uses the catalog only to make the message precise.
+- **The `serve` banner no longer presents the fallback URL as the backend** when
+  discovery is on. The resolved backend URL and how it was found are logged at
+  startup.
+- **Transcription upload handling is typed without a `type: ignore`**, which newer
+  Starlette versions report as unused.
+
 ### Added — Milestone A: make the existing claims true
 
 Milestone A of the gap analysis in [`docs/GAP-ANALYSIS.md`](docs/GAP-ANALYSIS.md), which
