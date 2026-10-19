@@ -45,7 +45,7 @@ class Coalescer:
         existing = self._inflight.get(key)
         if existing is not None:
             self._coalesced += 1
-            return await existing, True
+            return await asyncio.shield(existing), True
 
         loop = asyncio.get_event_loop()
         fut: asyncio.Future = loop.create_future()
@@ -56,6 +56,11 @@ class Coalescer:
             if not fut.done():
                 fut.set_result(result)
             return result, False
+        except asyncio.CancelledError:
+            # The leader stopped: do not leave followers waiting on a pending future.
+            if not fut.done():
+                fut.cancel()
+            raise
         except Exception as exc:
             if not fut.done():
                 fut.set_exception(exc)
