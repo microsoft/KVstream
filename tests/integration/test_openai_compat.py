@@ -63,7 +63,11 @@ TOOL_RESPONSE_BODY = {
             "finish_reason": "tool_calls",
         }
     ],
-    "usage": {"prompt_tokens": 31, "completion_tokens": 12, "total_tokens": 43},
+    # 60 prompt tokens for 4 messages / 163 characters: 16 of them are chat
+    # template, leaving ~3.7 characters per text token, a realistic ratio. (The
+    # old 31 implied ~11 characters per text token, which the estimator rightly
+    # refuses to learn from now that template tokens are not counted as text.)
+    "usage": {"prompt_tokens": 60, "completion_tokens": 12, "total_tokens": 72},
 }
 
 # Raw SSE chunks as a real server sends them: a role-only opener, tool-call
@@ -121,7 +125,7 @@ TOOL_STREAM_CHUNKS = [
         "object": "chat.completion.chunk",
         "model": "backend-model-name",
         "choices": [],
-        "usage": {"prompt_tokens": 31, "completion_tokens": 12, "total_tokens": 43},
+        "usage": {"prompt_tokens": 60, "completion_tokens": 12, "total_tokens": 72},
     },
 ]
 
@@ -293,14 +297,20 @@ async def test_sampling_and_format_fields_are_not_dropped(client):
 
 @pytest.mark.asyncio
 async def test_absent_sampling_fields_are_not_invented(client):
-    """KVStream must not impose its own defaults on the model."""
+    """
+    KVStream must not impose its own sampling defaults on the model.
+
+    The one exception is the generation limit: a request that sets none is
+    sent `admission.default_max_tokens`, the length it was admitted on (see
+    `test_review4_fixes.py`). Everything else is left to the model.
+    """
     c, _, backend = client
     await c.post(
         "/v1/chat/completions",
         json={"model": "stub-model", "messages": [{"role": "user", "content": "hi"}]},
     )
     sent = backend.payloads[0]
-    assert "max_tokens" not in sent
+    assert sent["max_tokens"] == 512
     assert "temperature" not in sent
     assert "top_p" not in sent
 
@@ -383,7 +393,7 @@ async def test_usage_chunk_is_delivered_when_the_client_asks(client):
     chunks = _sse_payloads(text)
     usage_chunks = [chunk for chunk in chunks if "usage" in chunk]
     assert len(usage_chunks) == 1
-    assert usage_chunks[0]["usage"]["total_tokens"] == 43
+    assert usage_chunks[0]["usage"]["total_tokens"] == 72
 
 
 @pytest.mark.asyncio
@@ -413,7 +423,7 @@ async def test_real_usage_is_not_labelled_estimated(client):
         json={"model": "stub-model", "messages": AGENT_MESSAGES},
     )
     assert "x-kvstream-usage" not in r.headers
-    assert r.json()["usage"]["total_tokens"] == 43
+    assert r.json()["usage"]["total_tokens"] == 72
 
 
 # -- caching a tool call -----------------------------------------------

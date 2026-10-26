@@ -63,20 +63,29 @@ def calibration_key_for(
     treated as exact.
     """
     return CalibrationKey(
-        model=backend.model,
+        # An undetermined model keys as "unknown", which matches no calibration
+        # record, so admission falls back to concurrency mode rather than
+        # applying a budget measured for some other model.
+        model=backend.model or UNKNOWN,
         device=resolve_device(backend.device),
         cli_generation=cli_generation,
         backend_version=backend_version,
     )
 
 
-def resolve_budget(cfg: AdmissionConfig, key: CalibrationKey) -> tuple[int, str, dict]:
+def resolve_budget(
+    cfg: AdmissionConfig, key: CalibrationKey, *, quiet: bool = False
+) -> tuple[int, str, dict]:
     """
     Resolve the effective ``(budget, unit, provenance)`` from configuration.
 
     In ``tokens`` mode, use the configured budget or, if unset, a calibrated
     value for ``key``. If neither is available, fall back to ``concurrency``
     mode so the gateway always starts with a working, honest limiter.
+
+    ``quiet`` suppresses the warnings, for a provisional resolution made
+    before the environment is known (the gateway resolves again at startup,
+    once the CLI version and model are detected, and that one speaks).
     """
     provenance: dict = {"source": "config", "key": key.as_dict()}
 
@@ -89,7 +98,7 @@ def resolve_budget(cfg: AdmissionConfig, key: CalibrationKey) -> tuple[int, str,
         provenance["lookup"] = lookup.as_dict()
         if lookup.usable:
             provenance["source"] = f"calibration:{lookup.match}"
-            if lookup.match == "partial":
+            if lookup.match == "partial" and not quiet:
                 logger.warning(
                     "using a calibrated budget measured in a different environment "
                     "(%s); re-run `kvstream calibrate` to remove this warning.",
@@ -97,7 +106,8 @@ def resolve_budget(cfg: AdmissionConfig, key: CalibrationKey) -> tuple[int, str,
                 )
             return lookup.budget_tokens, "tokens", provenance
 
-        logger.warning(
+        log = logger.debug if quiet else logger.warning
+        log(
             "admission.mode=tokens but no budget configured or calibrated for %s: %s. "
             "Falling back to concurrency mode (run `kvstream calibrate`).",
             key.as_str(),
@@ -109,9 +119,9 @@ def resolve_budget(cfg: AdmissionConfig, key: CalibrationKey) -> tuple[int, str,
 
 
 def build_capacity_manager(
-    cfg: AdmissionConfig, key: CalibrationKey
+    cfg: AdmissionConfig, key: CalibrationKey, *, quiet: bool = False
 ) -> tuple[CapacityManager, dict]:
-    budget, unit, provenance = resolve_budget(cfg, key)
+    budget, unit, provenance = resolve_budget(cfg, key, quiet=quiet)
     manager = CapacityManager(
         budget=budget,
         unit=unit,

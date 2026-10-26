@@ -156,6 +156,12 @@ def _run(argv: list[str], timeout: float) -> tuple[int, str] | None:
             argv,
             capture_output=True,
             text=True,
+            # The CLI writes UTF-8 whatever the console code page. Decoding with
+            # the locale default (cp1252 on Windows) failed on the first non-
+            # ASCII character, e.g. the "●" in `● success:`: the reader thread
+            # raised, the whole output was lost, and `None` came back as text.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             # Never let a CLI prompt block the gateway's startup.
             stdin=subprocess.DEVNULL,
@@ -163,7 +169,7 @@ def _run(argv: list[str], timeout: float) -> tuple[int, str] | None:
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("foundry CLI call %s failed: %s", argv, exc)
         return None
-    return proc.returncode, f"{proc.stdout}\n{proc.stderr}"
+    return proc.returncode, f"{proc.stdout or ''}\n{proc.stderr or ''}"
 
 
 async def _run_async(argv: list[str], timeout: float) -> tuple[int, str] | None:
@@ -350,6 +356,72 @@ async def list_models(cli: FoundryCli, timeout: float = 5.0) -> list[str] | None
     except (ValueError, TypeError):
         return None
     return _collect_model_ids(payload)
+
+
+async def list_loaded(cli: FoundryCli, timeout: float = 5.0) -> list[str] | None:
+    """
+    Ids of the models Foundry Local has loaded, from ``foundry cache list``.
+
+    This is the only source found that says what is *loaded*. Measured on CLI
+    0.10.3: ``/v1/models`` lists every downloaded model whether loaded or not
+    (and a request for an unloaded one is refused), ``foundry model list`` has
+    no loaded field, and ``foundry status`` reports only a count. ``foundry
+    cache list --output json`` gives ``{"models": [{"id", "alias", "loaded",
+    …}]}`` with a per-model flag that tracks load and unload.
+
+    Returns ``None`` whenever that cannot be read — no CLI, the service-based
+    generation, a failed call, or an unexpected shape — so callers can tell
+    "nothing is loaded" (``[]``) from "unknown". Callers must only use this
+    while the daemon is already running: on 0.10.3 this command starts the
+    daemon if it is stopped.
+    """
+    entries = await read_cache(cli, timeout)
+    return loaded_ids(entries) if entries is not None else None
+
+
+async def read_cache(cli: FoundryCli, timeout: float = 5.0) -> list[dict] | None:
+    """
+    The model entries of ``foundry cache list --output json``, or ``None``.
+
+    One call answers two questions — which models are loaded, and what type
+    each one is — so callers that need both read it once. Returns ``None`` for
+    any shape other than the one verified on CLI 0.10.3:
+    ``{"models": [{"id", "type", "loaded", …}]}`` with a boolean ``loaded``.
+    The same caveat as :func:`list_loaded` applies: this starts a stopped daemon.
+    """
+    if not cli.available or cli.path is None or cli.generation == GEN_SERVICE:
+        return None
+    result = await _run_async([cli.path, "cache", "list", "--output", "json"], timeout)
+    if result is None:
+        return None
+    code, output = result
+    if code != 0:
+        return None
+    try:
+        payload = json.loads(_first_json_document(output))
+    except (ValueError, TypeError):
+        return None
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        return None
+    for entry in models:
+        if not isinstance(entry, dict) or not isinstance(entry.get("loaded"), bool):
+            return None  # no per-model flag: the shape is not the one verified
+    return models
+
+
+def loaded_ids(entries: list[dict]) -> list[str]:
+    """Ids of the loaded models among ``foundry cache list`` entries."""
+    return [e["id"] for e in entries if e["loaded"] and isinstance(e.get("id"), str)]
+
+
+def model_types(entries: list[dict]) -> dict[str, str]:
+    """``{id: type}`` for the entries that state both (``"Chat"`` on CLI 0.10.3)."""
+    return {
+        e["id"]: e["type"]
+        for e in entries
+        if isinstance(e.get("id"), str) and isinstance(e.get("type"), str)
+    }
 
 
 async def show_model(cli: FoundryCli, model_id: str, timeout: float = 5.0) -> dict | None:

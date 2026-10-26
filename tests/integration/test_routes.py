@@ -92,11 +92,15 @@ async def test_embeddings_are_admitted_against_the_token_budget(client):
 
 @pytest.mark.asyncio
 async def test_embeddings_usage_calibrates_the_estimator(client):
-    """Embedding responses carry real prompt counts too."""
+    """Embedding responses carry real prompt counts too — for the embedding model."""
+    from kvstream.tokenization import KIND_EMBEDDINGS
+
     c, gw, _ = client
-    assert gw.estimator.calibrated is False
+    assert gw.estimators.for_model("stub-model", KIND_EMBEDDINGS).calibrated is False
     await c.post("/v1/embeddings", json={"model": "stub-model", "input": "a" * 21})
-    assert gw.estimator.calibrated is True
+    assert gw.estimators.for_model("stub-model", KIND_EMBEDDINGS).calibrated is True
+    # An embedding tokenizer says nothing about the chat model's.
+    assert gw.estimator.calibrated is False
 
 
 @pytest.mark.asyncio
@@ -217,6 +221,7 @@ async def test_status_reports_which_routes_are_proxied(client):
         "models": True,
         "embeddings": True,
         "transcriptions": True,
+        "completions": True,
     }
     assert body["audio_admission"]["unit"] == "concurrency"
 

@@ -25,6 +25,7 @@ an approximation — that limitation is documented, not hidden.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from math import ceil
 
 from kvstream.models import ChatMessage
@@ -139,12 +140,20 @@ class TokenEstimator:
         """True once at least one real usage report has been observed."""
         return self._samples > 0
 
-    def estimate_text(self, text: str) -> int:
-        return max(0, ceil(estimate_tokens(text, self._cpt, self._upt) * self._safety))
+    def estimate_text(self, text: str, *, with_safety: bool = True) -> int:
+        """
+        Estimated tokens in ``text``.
 
-    def estimate_messages(self, messages: list[ChatMessage]) -> int:
+        ``with_safety`` applies ``token_safety_factor``, which is headroom for
+        *admission*. A count reported back to a client is a best estimate of
+        what was used, and is asked for without it.
+        """
+        base = estimate_tokens(text, self._cpt, self._upt)
+        return max(0, ceil(base * self._safety)) if with_safety else base
+
+    def estimate_messages(self, messages: list[ChatMessage], *, with_safety: bool = True) -> int:
         base = estimate_prompt_tokens(messages, self._cpt, self._upt)
-        return max(1, ceil(base * self._safety))
+        return max(1, ceil(base * self._safety)) if with_safety else base
 
     # -- calibration ---------------------------------------------------
 
@@ -183,6 +192,64 @@ class TokenEstimator:
             "safety_factor": self._safety,
             "samples": self._samples,
             "calibrated": self.calibrated,
+        }
+
+
+# Kinds of traffic that learn separately. An embedding model has its own
+# tokenizer, so its usage reports say nothing about a chat model's.
+KIND_CHAT = "chat"
+KIND_EMBEDDINGS = "embeddings"
+
+
+class EstimatorRegistry:
+    """
+    One :class:`TokenEstimator` per (kind of traffic, model).
+
+    A single shared estimator learned every model's tokenizer at once: with two
+    models loaded — or a chat model and an embedding model — each report pulled
+    the ratios toward a different truth and neither model was estimated well.
+
+    Estimators are created only by :meth:`learner`, i.e. once a model has
+    returned real usage, so a client naming arbitrary models cannot grow this
+    without bound. Until then a model is costed by an untrained default that
+    never learns, which is exactly how every model was costed before learning.
+    """
+
+    def __init__(self, factory: Callable[[], TokenEstimator], max_models: int = 64) -> None:
+        self._factory = factory
+        self._max = max(1, max_models)
+        self._default = factory()
+        self._learned: dict[tuple[str, str], TokenEstimator] = {}
+
+    @staticmethod
+    def _key(model: str, kind: str) -> tuple[str, str]:
+        # `…-gpu` and `…-gpu:2` are the same tokenizer: Foundry lists one and
+        # answers to the other.
+        base, sep, suffix = model.rpartition(":")
+        return kind, (base if sep and suffix.isdigit() else model)
+
+    def for_model(self, model: str, kind: str = KIND_CHAT) -> TokenEstimator:
+        """The estimator that costs ``model``'s requests."""
+        return self._learned.get(self._key(model, kind), self._default)
+
+    def learner(self, model: str, kind: str = KIND_CHAT) -> TokenEstimator | None:
+        """The estimator ``model``'s usage reports train, or ``None`` when full."""
+        key = self._key(model, kind)
+        learned = self._learned.get(key)
+        if learned is None:
+            if len(self._learned) >= self._max:
+                return None
+            learned = self._factory()
+            self._learned[key] = learned
+        return learned
+
+    def stats(self) -> dict:
+        return {
+            "default": self._default.stats(),
+            "learned": {
+                f"{kind}:{model}": estimator.stats()
+                for (kind, model), estimator in sorted(self._learned.items())
+            },
         }
 
 

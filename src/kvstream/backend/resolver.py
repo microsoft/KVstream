@@ -66,7 +66,7 @@ class BackendResolver:
         self,
         *,
         configured_url: str,
-        model: str,
+        model: str | None,
         pinned: bool,
         use_cli: bool,
         cli_path: str | None = None,

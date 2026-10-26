@@ -66,9 +66,10 @@ class EmptyBackend(BrokenBackend):
         yield Token(text="ok", finish_reason="stop")
 
 
-def _app(backend) -> tuple:
+def _app(backend, force_min_interval: float = 5.0) -> tuple:
     settings = Settings()
     settings.backend.model = "stub-model"
+    settings.backend.readiness_force_min_interval_seconds = force_min_interval
     app = build_app(settings)
     app.state.gateway.backend = backend
     return app, app.state.gateway
@@ -200,7 +201,7 @@ async def test_readiness_is_cached_so_the_probe_is_not_load():
     from stubs import StubBackend
 
     backend = StubBackend()
-    app, _ = _app(backend)
+    app, _ = _app(backend, force_min_interval=0.0)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         for _ in range(5):
             await c.get("/health")
@@ -208,6 +209,20 @@ async def test_readiness_is_cached_so_the_probe_is_not_load():
         await c.get("/health?probe=true")  # explicit refresh
     assert cached == 1  # five checks, one generation
     assert backend.once_calls == 2  # forced probe ran
+
+
+@pytest.mark.asyncio
+async def test_forced_probes_are_rate_limited():
+    """`?probe=true` in a loop must not become unadmitted generations."""
+    from stubs import StubBackend
+
+    backend = StubBackend()
+    app, _ = _app(backend)  # default 5 s minimum between forced probes
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        for _ in range(10):
+            r = await c.get("/health?probe=true")
+            assert r.status_code == 200
+    assert backend.once_calls == 1
 
 
 def test_refuses_to_start_as_one_of_several_workers(monkeypatch):

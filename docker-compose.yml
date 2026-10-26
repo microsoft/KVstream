@@ -3,6 +3,14 @@
 # Foundry Local is a host application, so the container reaches it through the
 # host gateway rather than a service link. The URL must be explicit: discovery
 # cannot work across a network namespace.
+#
+# Foundry Local CLI 0.10.x picks a new port on each start, so there is no URL
+# that can be shipped here. Set it when starting:
+#
+#   FOUNDRY_URL=http://host.docker.internal:<port> docker compose up -d
+#
+# with <port> from `foundry status`. Compose refuses to start without it rather
+# than pointing at a port nothing listens on.
 services:
   kvstream:
     build: .
@@ -11,8 +19,11 @@ services:
     environment:
       # host.docker.internal resolves to the host on Docker Desktop; on Linux
       # the extra_hosts entry below provides it.
-      KVSTREAM_BACKEND__BASE_URL: "http://host.docker.internal:5273"
-      KVSTREAM_BACKEND__MODEL: "phi-3-mini"
+      KVSTREAM_BACKEND__BASE_URL: "${FOUNDRY_URL:?set FOUNDRY_URL to Foundry Local's URL, e.g. http://host.docker.internal:<port from foundry status>}"
+      # The full model id, as `/v1/models` lists it (a catalog alias such as
+      # phi-3-mini is refused by the inference API). Empty means auto-detect,
+      # which in a container works only when Foundry Local lists one model.
+      KVSTREAM_BACKEND__MODEL: "${KVSTREAM_MODEL:-}"
       KVSTREAM_ADMISSION__MODE: "concurrency"
       KVSTREAM_ADMISSION__MAX_CONCURRENCY: "8"
     extra_hosts:

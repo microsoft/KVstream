@@ -124,10 +124,17 @@ def baseline_from_provenance(provenance: dict) -> float:
     """
     Recover the calibration-time service rate from a stored budget record.
 
-    The sweep keeps its evidence alongside the number (Appendix B §B.6), so the
-    baseline is the per-token rate of the last healthy point. Returns 0.0 when
-    the budget did not come from calibration, which leaves drift detection
-    inactive rather than comparing against something invented.
+    The record's ``baseline_seconds_per_token`` is the median seconds per
+    actually-processed token at the knee, measured on the same basis as the
+    live samples :meth:`DriftMonitor.observe` takes: whole-request latency
+    including time to first token, over prompt plus generated tokens.
+
+    Records written before that field existed are **not** used. Their only
+    per-token figures are p99s over *requested* tokens, and the old baseline
+    (the worst of those) compared against a mean over *actual* tokens, so the
+    ratio meant nothing. Drift detection stays inactive until the next
+    ``kvstream calibrate`` rather than reporting a number it cannot back.
+    Returns 0.0 whenever there is no usable baseline.
     """
     lookup = provenance.get("lookup")
     if not isinstance(lookup, dict):
@@ -135,15 +142,12 @@ def baseline_from_provenance(provenance: dict) -> float:
     record = lookup.get("record")
     if not isinstance(record, dict):
         return 0.0
-    sweep = record.get("sweep")
-    if not isinstance(sweep, list) or not sweep:
-        return 0.0
-    rates = [
-        float(point["p99_per_token"])
-        for point in sweep
-        if isinstance(point, dict)
-        and isinstance(point.get("p99_per_token"), int | float)
-        and point["p99_per_token"] > 0
-        and not point.get("errors")
-    ]
-    return max(rates) if rates else 0.0
+    baseline = record.get("baseline_seconds_per_token")
+    if isinstance(baseline, int | float) and baseline > 0:
+        return float(baseline)
+    if record.get("sweep"):
+        logger.info(
+            "calibration record predates the drift baseline; drift detection is "
+            "inactive until `kvstream calibrate` is re-run"
+        )
+    return 0.0

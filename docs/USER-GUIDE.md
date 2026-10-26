@@ -5,7 +5,9 @@ someone who did not build it.
 
 Every procedure here **except the Docker one** was performed against a live
 `foundry 0.8.119` with `phi-3-mini-4k` on Windows; SOP 2 is written from
-configuration rather than from a run, and says so. Where a step has a known
+configuration rather than from a run, and says so. SOP 1 was later re-run
+against Foundry Local CLI 0.10.3 (`foundry server start`, `foundry model load`,
+`kvstream serve` with auto-detection, `kvstream health`, `kvstream calibrate`). Where a step has a known
 failure mode, it is written down next to the step rather than left for you to
 discover.
 
@@ -53,7 +55,7 @@ Foundry Local at once, queues the rest, and refuses what it cannot serve.
 
 ```bash
 git clone https://github.com/microsoft/KVstream
-cd KVstream/kvstream-foundry
+cd KVstream
 pip install -e .
 ```
 
@@ -66,10 +68,9 @@ foundry service start
 foundry model run phi-3-mini-4k
 ```
 
-On Foundry Local CLI 0.10.0 (Preview) the published equivalents are
-`foundry server start` and `foundry model load <model>`. **Unverified** — no
-0.10.x binary was available to test against, so every 0.10.x instruction in this
-guide comes from the published command surface rather than from a run.
+On Foundry Local CLI 0.10.x the equivalents are `foundry server start` and
+`foundry model load <alias>` — run against 0.10.3. There, `foundry status` shows
+the URL; KVStream reads it from `foundry status --output json` itself.
 
 Verify: `foundry service status` prints a green line with a URL. **Note the
 port** — it changes on almost every restart.
@@ -94,17 +95,30 @@ Copy the `id` value exactly, including any `:2` suffix.
 ### Step 4 — Start the gateway
 
 ```bash
-kvstream serve --model "Phi-3-mini-4k-instruct-generic-gpu:2"
+kvstream serve
 ```
 
-It binds `127.0.0.1:8080` and finds the backend by itself.
+It binds `127.0.0.1:8080`, finds the backend by itself, and auto-detects the
+model when exactly one is loaded. The log names the model and how it was found.
+An auto-detected model is re-detected if Foundry Local stops serving it (for
+example after `foundry model unload` and loading another); a model you pass with
+`--model` is never replaced.
+
+`--model` is optional. It is the model KVStream uses for its own readiness
+probe, startup check and calibration records; your clients' requests name their
+own model and are forwarded unchanged. Pass it when several models are loaded,
+or in a container, where the `foundry` CLI is unavailable and KVStream cannot
+tell which listed model is loaded:
+
+```bash
+kvstream serve --model "Phi-3-mini-4k-instruct-generic-gpu:2"
+```
 
 To pin the backend instead of discovering it — required in containers, and
 sensible whenever you already know the URL:
 
 ```bash
-kvstream serve --backend-url http://127.0.0.1:51264 \
-               --model "Phi-3-mini-4k-instruct-generic-gpu:2"
+kvstream serve --backend-url http://127.0.0.1:51264
 ```
 
 Setting `--backend-url` **disables discovery entirely**. That is deliberate: an
@@ -193,11 +207,14 @@ docker run --rm -p 8080:8080 \
 `--add-host` is needed on Linux. Docker Desktop resolves `host.docker.internal`
 already.
 
-Or with compose, after editing the URL and model in `docker-compose.yml`:
+Or with compose, passing the URL (required) and the model id (optional):
 
 ```bash
-docker compose up --build
+FOUNDRY_URL=http://host.docker.internal:51264 KVSTREAM_MODEL="Phi-3-mini-4k-instruct-generic-gpu:2" docker compose up --build
 ```
+
+Use the full model id `/v1/models` lists; a catalog alias such as `phi-3-mini`
+is refused by the inference API.
 
 ### Step 4 — Verify
 
@@ -206,7 +223,9 @@ curl http://localhost:8080/health
 ```
 
 Docker's own `HEALTHCHECK` uses the same endpoint, so `docker ps` will show the
-container as unhealthy when the backend stops serving.
+container as unhealthy when the backend stops serving. It waits
+`KVSTREAM_BACKEND__READINESS_TIMEOUT_SECONDS` plus 10 seconds, because `/health`
+may run a real 1-token generation.
 
 ### Standing caveat
 
@@ -244,7 +263,7 @@ if `WEB_CONCURRENCY`, `UVICORN_WORKERS`, `GUNICORN_WORKERS` or
 ### Checking
 
 ```bash
-kvstream health          # gateway + backend, one line each
+kvstream health          # gateway + backend; exits 1 unless the backend is serving
 kvstream status          # live admission table
 curl localhost:8080/status | python -m json.tool   # everything
 ```
@@ -261,8 +280,10 @@ Four fields answer most questions:
 ### Stopping
 
 Send `SIGTERM` (`Ctrl-C`, `docker stop`, systemd). The gateway stops admitting,
-turns away anything still queued, and gives in-flight requests
-`drain_timeout_seconds` (default 30) to finish.
+immediately turns away anything still queued (503, "shutting down"), and gives
+in-flight requests `drain_timeout_seconds` (default 30) to finish. Anything
+still running at that deadline is cancelled: a non-streamed request then gets
+HTTP 500 from uvicorn, and a stream ends without `[DONE]`.
 
 Do not `kill -9` unless it has stopped responding — you will cut off in-flight
 responses that were about to complete.
@@ -347,9 +368,13 @@ says which axis did not match. The usual cause is a `--device` label that differ
 from the one used at calibration time.
 
 > **Honest limitation.** Token mode has been exercised against a modelled runtime
-> and in unit tests, but not against real hardware — every real-hardware run in
-> this project ended up in concurrency mode for exactly the reason above. Treat
-> token mode as the less-travelled path.
+> and in unit tests. Every documented real-hardware run ended up in concurrency
+> mode for exactly the reason above; one undocumented token-mode run is stored in
+> `benchmarks/results-real-hardware.json`, of unknown code version and never
+> repeated. Treat token mode as the less-travelled path. A request that sets no
+> limit is sent `admission.default_max_tokens` (`kvstream serve --max-tokens`,
+> default 512), so it cannot outgrow its reservation; with
+> `admission.apply_default_max_tokens: false` it can.
 
 ---
 
@@ -475,7 +500,9 @@ Check `admission.queue.depth`: consistently 0 means you are not overloaded.
 ### R10 — `token_estimator.samples` stays at 0
 
 **Cause:** your backend does not report token counts. Foundry Local 0.8.119 does
-not.
+not; Foundry Local CLI 0.10.3 does (checked on streamed and non-streamed
+responses), so on 0.10.3 a count stuck at 0 means no traffic has completed for
+the model KVStream uses — see `token_estimators` in `/status` for the others.
 
 **Effect:** the token estimator never calibrates, so its uncalibrated accuracy
 applies. Cost estimates skew high, which is the safe direction.
@@ -508,7 +535,9 @@ Rejection reasons you will see: `queue_full`, `timeout`, `predicted_wait`,
 Config lives in `kvstream.yaml` in the working directory, or `--config <path>`.
 Every field is also an environment variable: `KVSTREAM_ADMISSION__MODE=tokens`.
 Precedence is CLI flags → environment → YAML → defaults. See
-`kvstream.example.yaml` for the annotated full set.
+`kvstream.example.yaml` for the annotated full set. A file named with
+`--config` must exist: a missing or malformed one stops `kvstream` with exit
+code 2 instead of silently running on defaults.
 
 ### Interactive clients that will not wait
 
@@ -567,11 +596,14 @@ single-flighted, but it is not free.
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `kvstream serve` | run the gateway | `--config --host --port --model --backend-url --mode --max-concurrency` |
-| `kvstream health` | gateway + backend health | `--url` |
+| `kvstream serve` | run the gateway | `--config --host --port --model --backend-url --mode --max-concurrency --max-tokens` |
+| `kvstream health` | gateway + backend health; exit 1 unless serving | `--url --timeout` |
 | `kvstream status` | live admission table | `--url` |
 | `kvstream calibrate` | measure the token budget | `--model --device --trials --warmup --refine/--no-refine --max-concurrency` |
 | `kvstream bench` | send load, report latency | `--url --model --concurrency --total --max-tokens` |
+
+`--model` is optional for all three. `serve` and `calibrate` auto-detect it when
+exactly one model is loaded; `bench` uses the model the running gateway resolved.
 
 ### Endpoints
 

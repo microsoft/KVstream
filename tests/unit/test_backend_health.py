@@ -171,8 +171,31 @@ async def test_readiness_is_cached():
 @pytest.mark.asyncio
 async def test_a_forced_probe_bypasses_the_cache():
     client = FakeClient()
-    health = BackendHealth(client, readiness_interval=60.0)
+    health = BackendHealth(client, readiness_interval=60.0, force_min_interval=0.0)
     await health.check_ready("m")
+    await health.check_ready("m", force=True)
+    assert client.generations == 2
+
+
+@pytest.mark.asyncio
+async def test_a_forced_probe_still_honours_its_minimum_interval():
+    client = FakeClient()
+    health = BackendHealth(client, readiness_interval=60.0, force_min_interval=5.0)
+    await health.check_ready("m")
+    for _ in range(5):
+        await health.check_ready("m", force=True)
+    assert client.generations == 1
+    health.readiness.checked_at -= 5.0  # the minimum interval has passed
+    await health.check_ready("m", force=True)
+    assert client.generations == 2
+
+
+@pytest.mark.asyncio
+async def test_forcing_never_caches_longer_than_an_unforced_check():
+    client = FakeClient()
+    health = BackendHealth(client, readiness_interval=1.0, force_min_interval=5.0)
+    await health.check_ready("m")
+    health.readiness.checked_at -= 1.0
     await health.check_ready("m", force=True)
     assert client.generations == 2
 

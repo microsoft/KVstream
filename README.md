@@ -17,10 +17,10 @@ Foundry Local runs models locally on the ONNX Runtime. When several clients call
 
 KVStream addresses that at the gateway layer:
 
-- **Admission control** — only as much work as the backend can handle reaches it at once; the rest queues.
-- **Backpressure** — overflow gets a `503` with `Retry-After`, and gets it quickly rather than after the full timeout.
+- **Admission control** — only as much work as the admission budget allows reaches the backend at once; the rest queues. The budget is a configured request count or a calibrated token estimate, not a reading of the backend's real capacity.
+- **Backpressure** — overflow gets a `503` with `Retry-After`. When the measured drain rate shows the queue cannot reach a request in time, the refusal comes early; otherwise it comes when `admission_timeout_seconds` runs out.
 - **Ephemeral-port discovery** — Foundry Local's port changes on almost every restart.
-- **Route coverage** — chat, completions, embeddings and transcription are all admitted, so clients cannot route around the gateway.
+- **Route coverage** — chat, completions, embeddings and transcription are all admitted, so traffic sent through the gateway cannot dodge admission by switching routes. (Foundry Local itself stays reachable on localhost; KVStream only governs what is sent to it.)
 - **Backend health that means something** — liveness and readiness reported separately, plus a circuit breaker.
 - **Response cache and request coalescing** for repetitive deterministic calls.
 - **Prometheus metrics** that reflect real admission, queueing, cache and coalescing behaviour.
@@ -33,7 +33,7 @@ KVStream addresses that at the gateway layer:
 
 ```bash
 git clone https://github.com/microsoft/KVstream
-cd KVstream/kvstream-foundry
+cd KVstream
 pip install -e .
 ```
 
@@ -54,28 +54,38 @@ foundry model run phi-3-mini-4k
 
 On **Foundry Local CLI 0.10.0 (Preview)** the equivalents are `foundry server start` and `foundry model load`.
 
-### 2. Find the model id the backend actually answers to
+### 2. Know the model id your clients must send
 
-This step is not optional, and it is the most common way a first run fails. The catalog *alias* is often **not** the id the inference API accepts:
+Every request your clients send names a model, and the catalog *alias* is often **not** an id the inference API accepts. This is the most common way a first run fails:
 
 ```bash
 curl http://127.0.0.1:<port>/v1/models
 ```
 
-On the machine this was developed against, the alias `phi-3-mini-4k` returned **HTTP 400** from `/v1/chat/completions`, while the id from `/v1/models` — `Phi-3-mini-4k-instruct-generic-gpu:2` — worked. Use the id, not the alias.
+On the machine this was developed against, the alias `phi-3-mini-4k` returned **HTTP 400** from `/v1/chat/completions`, while the id from `/v1/models` — `Phi-3-mini-4k-instruct-generic-gpu` (with or without the `:2` suffix) — worked. Use the id, not the alias. On CLI 0.10.3, `/v1/models` lists every *downloaded* model, so a listed model is not necessarily loaded.
 
 You can get the port from `foundry service status` (or `foundry status` on 0.10.x), but KVStream will find it itself.
 
 ### 3. Start the gateway
 
 ```bash
+kvstream serve
+```
+
+It binds `127.0.0.1:8080`, finds Foundry Local, and **auto-detects the model** when exactly one is loaded. The startup log says what it found, e.g. `model: Phi-3-mini-4k-instruct-generic-gpu:2 (auto-detected: the only model loaded in Foundry Local)`.
+
+`--model` is optional. It names the model KVStream uses *itself*: for its readiness probe, its startup check and calibration records. Client requests carry their own model and are forwarded unchanged. Pass it when several models are loaded, or when the CLI is unavailable (e.g. in a container) and more than one model is listed:
+
+```bash
 kvstream serve --model "Phi-3-mini-4k-instruct-generic-gpu:2"
 ```
 
-It binds `127.0.0.1:8080` and resolves the backend automatically. To pin the backend instead of discovering it:
+With no model or several models loaded, KVStream does not pick one: it logs why, keeps forwarding requests, and `/health` reports not ready until a model is determined. Loading one later is picked up by the next health check, and an auto-detected model is re-detected if Foundry Local stops serving it. The one inference it does make: without a usable `foundry` CLI (as in a container) it cannot see what is *loaded*, so if Foundry Local lists exactly one model it adopts that one and lets the readiness probe confirm it.
+
+To pin the backend instead of discovering it:
 
 ```bash
-kvstream serve --backend-url http://127.0.0.1:51264 --model "Phi-3-mini-4k-instruct-generic-gpu:2"
+kvstream serve --backend-url http://127.0.0.1:51264
 ```
 
 Setting the URL explicitly **disables discovery entirely** — see [Both Foundry Local CLI generations](#both-foundry-local-cli-generations).
@@ -86,7 +96,7 @@ Setting the URL explicitly **disables discovery entirely** — see [Both Foundry
 curl http://localhost:8080/health
 ```
 
-`"backend_serving": true` means the backend completed a real trial generation. `"backend_reachable": true` on its own only means it answered `/v1/models` — which a stalled runtime keeps doing. A `503` here means the gateway will not be able to serve you either, and the `hint` field says why.
+`"backend_serving": true` means the backend completed a real trial generation. `"backend_reachable": true` on its own only means it answered `/v1/models` — which a stalled runtime keeps doing. A `503` here means KVStream does not consider the backend serving — not reachable, the probe failed, the circuit breaker is open, or no model has been determined for KVStream's own probe (requests are still forwarded in that last case) — and the `hint` field says which.
 
 ### 5. Send a request
 
@@ -143,20 +153,21 @@ docker run --rm -p 8080:8080 \
 
 `--add-host` is needed on Linux; Docker Desktop resolves `host.docker.internal` already.
 
-Or with compose, which sets the same things:
+Or with compose, which sets the same things from two variables:
 
 ```bash
-docker compose up --build
+FOUNDRY_URL=http://host.docker.internal:51264 KVSTREAM_MODEL="Phi-3-mini-4k-instruct-generic-gpu:2" docker compose up --build
 ```
 
-Edit `docker-compose.yml` to point `KVSTREAM_BACKEND__BASE_URL` at your actual port and `KVSTREAM_BACKEND__MODEL` at your actual model id.
+`FOUNDRY_URL` is required (compose refuses to start without it, since Foundry Local has no fixed port); take the port from `foundry status`. `KVSTREAM_MODEL` is the full id `/v1/models` lists, not a catalog alias such as `phi-3-mini`, which the inference API refuses; leave it unset to auto-detect when Foundry Local lists a single model.
 
 **Two things to know about the container:**
 
-- **The backend port changes.** Foundry Local takes a new ephemeral port on almost every restart, and the container cannot discover it. Either pin Foundry Local's URL on the host side, or update the environment variable after each restart.
+- **The backend port changes.** Foundry Local takes a new ephemeral port on almost every restart, and the container cannot discover it. Update the URL after each restart (or fix Foundry Local's port, if your version allows it).
+- **Foundry Local listens on loopback.** On CLI 0.10.3 it reported `http://127.0.0.1:<port>`. A service bound only to `127.0.0.1` is generally not reachable from a container through `host.docker.internal` on Linux; whether Docker Desktop forwards it on Windows or macOS has not been tested here. If the container cannot connect, this is the likely reason.
 - **It runs unprivileged** and its `HEALTHCHECK` uses `/health`, so Docker will mark the container unhealthy when the backend stops serving. KVStream still has no authentication — publish the port only where that is acceptable.
 
-Configuration inside the image is by environment variable (`KVSTREAM_` prefix, `__` for nesting). To use a config file instead, mount it:
+Configuration inside the image is by environment variable (`KVSTREAM_` prefix, `__` for nesting). To use a config file as well, mount it — but the image sets `KVSTREAM_HOST`, `KVSTREAM_PORT`, `KVSTREAM_BACKEND__DISCOVER` and `KVSTREAM_BACKEND__USE_FOUNDRY_CLI`, and environment variables outrank the file, so those four cannot be changed from it:
 
 ```bash
 docker run --rm -p 8080:8080 -v "$PWD/kvstream.yaml:/home/kvstream/kvstream.yaml:ro" kvstream
@@ -183,7 +194,9 @@ The target is `benchmarks/simulated_foundry.py` — flat latency to 4 concurrent
 | direct to runtime | 24 / 120 | 96 | 20% | 3.8 req/s |
 | **through KVStream** | **120 / 120** | **0** | **100%** | **6.9 req/s** |
 
-Calibration produced a budget that held the runtime at 5 concurrent against a true optimum of 4, having been given neither number.
+The table is the stored run (`benchmarks/results-admission.json`). Re-run on 2026-10-20 it reproduced: direct 24/120 with 96 refused, through KVStream 120/120 with none refused, goodput 3.53 vs 6.6 req/s.
+
+**What did not reproduce is the calibrated budget.** The stored run's budget (688 tokens, holding the runtime at 5 concurrent against an optimum of 4) was produced by a calibration bug, since fixed: its refinement step accepted a point at **2.72x** the baseline latency against a 2x limit. With the fix, the sweep on this model is unstable — per-token latency at concurrency 2 lands right at the 2x line (1.82x in one run, 2.13x in another) — and re-runs gave budgets of 82 and 294 tokens, holding the runtime at 1–3 concurrent. The goodput result held either way, but the claim that calibration finds the optimum unaided is not supported.
 
 **Not overloaded** — 40 requests, 12 concurrent, a load the runtime absorbs unaided:
 
@@ -241,14 +254,20 @@ Local inference capacity is hardware-specific and Foundry Local does not expose 
 
 **With the gateway in front, the same class of load survived.** 60 requests with ~1200-token prompts produced 32 served, 28 shed with `503`, and a backend still answering in 0.34s afterwards.
 
+The figures in the rest of this section come from development sessions on that machine; [Gap analysis](docs/GAP-ANALYSIS.md) records some of them, and the raw logs for the others are not in the repository.
+
 **Shedding is fast.** Those 503s used to come back at a flat 120.1s — the admission timeout, to the decimal. A queued request now re-predicts whether the queue can still reach it in time and gives up early: same hardware, same load, **median 8.1s**, minimum 0.1s, with a `Retry-After` derived from the measured drain rate.
 
 **The circuit breaker works end to end.** When the backend genuinely failed, it opened after 8 consecutive errors, refused subsequent requests in **0.04s**, then after the cooldown admitted one trial (200 in 0.53s), closed, and served 15 of 15.
 
+### Re-checked on Foundry Local CLI 0.10.3
+
+The same machine later ran **Foundry Local CLI 0.10.3**, with the GPU variant `Phi-3-mini-4k-instruct-generic-gpu:2` loaded (which execution provider ran it was not determined; a 1-token generation took 0.17s). A `kvstream calibrate --max-concurrency 8 --trials 1` sweep found per-token latency **2.18x** the single-request figure at concurrency 2, with throughput within 1% — **serialising again**, so the knee was at concurrency 1. That is one short sweep with two points, not a characterisation of the GPU path; it is reported because it is the only 0.10.3 measurement there is. 0.10.3 does return `usage` on streamed and non-streamed responses, so the online token calibration described below does receive samples there.
+
 ### What this evidence does not show
 
 - **Admission control did not prevent the unprotected stall.** In the run that killed the runtime, the pressure was cumulative across a long session rather than instantaneous concurrency. A budget from a sixty-second calibration sweep does not describe what an hour of traffic does to the runtime's memory. Drift detection now *notices* this; nothing in the gateway prevents it. Preventing it is an in-engine problem.
-- **Token mode has never been exercised against real hardware.** Every real-hardware run above used `concurrency` mode. In the one attempt at token mode, the calibration record was keyed to a different `device` label than the gateway resolved, so it was correctly refused and the gateway fell back — visible in `/status` as `fallback:concurrency`. The token-budget claim rests on the modelled runtime and the unit tests.
+- **Token mode is essentially unverified on real hardware.** Every real-hardware run above used `concurrency` mode: in the documented attempt at token mode the calibration record was keyed to a different `device` label than the gateway resolved, so it was correctly refused and the gateway fell back (`fallback:concurrency` in `/status`). The repository does hold one other recorded run, `benchmarks/results-real-hardware.json`: token mode against a real `Phi-3-mini-4k-instruct-generic-gpu:2`, budget 48 tokens, 40 requests at 16 concurrent — 40/40 through KVStream at 0.81 req/s (p99 21.5s) against 40/40 direct at 0.44 req/s (p99 44.7s). It is not written up anywhere, which code version produced it is not known, it predates the fixes to calibration and to live accounting (it records 33 reservation overshoots, which that accounting bug produces), and it has not been repeated. Treat it as an anecdote, not evidence.
 - **Foundry Local 0.8.119 returns no `usage` block.** Online token calibration therefore receives no samples against it, and the *uncalibrated* estimator figures below are the ones that apply. The gateway degrades correctly and reports this as `backend.usage_reporting`.
 - **`admission_timeout_seconds` defaults to 120s.** The hardware runs above used 20s. No predictor makes a two-minute deadline reasonable for an interactive client.
 
@@ -303,9 +322,9 @@ The cost is head-of-line blocking: a large request at the front holds back small
 
 ### Live accounting
 
-A request is admitted on `prompt_tokens + max_tokens`, a worst case. KVStream settles the reservation against reality as the response streams, returning headroom a short generation was never going to use. Watch `kvstream_reservation_reclaimed_tokens_total`.
+A request is admitted on `prompt_tokens + max_tokens`, a worst case. While it generates, that reservation is held (and grown if the generation outruns it); the moment the generation finishes, it is settled to what was actually generated, returning headroom a short generation never used before the response has finished being written. Watch `kvstream_reservation_reclaimed_tokens_total`.
 
-`admission.reserve_completion_ratio` reserves only a fraction of `max_tokens` up front. That is an explicit trade: a generation that outgrows its reservation is topped up rather than truncated, which can transiently exceed the budget. Every such event increments `kvstream_reservation_overshoot_total`. At the default `1.0` overshoot is impossible.
+`admission.reserve_completion_ratio` reserves only a fraction of `max_tokens` up front. That is an explicit trade: a generation that outgrows its reservation is topped up rather than truncated, which can transiently exceed the budget. Every such event increments `kvstream_reservation_overshoot_total`. At the default `1.0` it does not happen: a request that sets no limit is costed at `admission.default_max_tokens` (512, or `kvstream serve --max-tokens N`) **and that same limit is sent upstream**, so it cannot generate more than it was admitted for. Only with `admission.apply_default_max_tokens: false` — which sends nothing and leaves the model's own default in force — can such a request outgrow its reservation. (Until 2026-10-20, live accounting also settled a *running* stream to what it had generated so far, handing back its reservation while it still needed it; that overshot at the default ratio and is fixed.)
 
 ### Shedding load
 
@@ -328,6 +347,7 @@ A caller can opt one request out without an operator changing anything:
 |---|---|
 | `Cache-Control: no-store` | skip the cache in both directions |
 | `Cache-Control: no-cache` | re-fetch, but still refresh the entry |
+| `Cache-Control: only-if-cached` | answer from the cache or not at all: a miss is `504` with code `cache_miss`, and nothing is sent upstream |
 | `x-kvstream-cache: no-store` | same, for clients that need `Cache-Control` for their own purposes |
 
 Set `cache.respect_request_headers: false` to ignore them. Responses larger than `cache.max_entry_bytes` are not cached — one huge entry evicts everything useful — and each skip is counted in `kvstream_cache_skipped_total`.
@@ -338,19 +358,23 @@ Set `cache.respect_request_headers: false` to ignore them. Responses larger than
 
 | | What it does |
 |---|---|
-| **Readiness** | `/health` reports `backend_reachable` (answers `/v1/models`) separately from `backend_serving` (completed a bounded trial generation), and returns 503 unless it is *serving*. The probe is a real generation, so it is cached for `readiness_interval_seconds` and single-flighted. `?probe=true` forces a fresh one. |
+| **Readiness** | `/health` reports `backend_reachable` (answers `/v1/models`) separately from `backend_serving` (completed a bounded trial generation), and returns 503 unless it is *serving*. The probe is a real generation, so it is cached for `readiness_interval_seconds` and single-flighted. `?probe=true` forces a fresh one, at most once per `readiness_force_min_interval_seconds` (5 s). |
 | **Circuit breaker** | After `circuit_breaker_failures` consecutive backend failures, requests fail fast with 503 + `Retry-After` instead of queueing behind a backend that will not answer. One trial is allowed through after the cooldown. Client 4xx never trips it. |
 | **Drift detection** | Served seconds-per-token is compared against the baseline recorded at calibration time. Exceed `drift_warn_ratio` and KVStream warns that the budget was measured on a backend that no longer behaves this way. It warns; it does not silently re-tune itself. |
 
 All three exist because of one measured failure: the runtime stopped completing generations entirely while `/v1/models` kept answering **200 in 4 ms**. Liveness said everything was fine. Metrics: `kvstream_backend_ready`, `kvstream_circuit_breaker_state`, `kvstream_backend_drift_ratio`.
 
-**Drift detection is inactive without a calibration record**, since there is no baseline to compare against — `/status` reports `drift.state: unknown`.
+**Drift detection is inactive without a calibration record**, since there is no baseline to compare against — `/status` reports `drift.state: unknown`. The baseline is the median seconds per processed token (prompt + generated, time to first token included) at the calibrated knee, which is the same basis live requests are measured on. **Records written before 2026-10-11 lack it and leave drift inactive until you re-run `kvstream calibrate`.** Their per-token figures used a different basis, so the old ratio did not mean what it claimed.
 
 ---
 
 ## Shutdown
 
-The gateway stops admitting, turns away anything still **queued** (it has not started, so it loses nothing by retrying), and gives in-flight requests `drain_timeout_seconds` to finish. Requests arriving during shutdown get a 503 that says shutdown, distinct from an overload 503.
+On Ctrl+C or SIGTERM the gateway stops admitting and **immediately** turns away anything still **queued** with a 503 that says shutdown, distinct from an overload 503. A queued request has not started, so it loses nothing by retrying. In-flight requests get `drain_timeout_seconds` to finish.
+
+Any request still running at that deadline is cancelled. Uvicorn answers a cancelled non-streamed request with **HTTP 500**, and a stream is cut off without `[DONE]`. Set `drain_timeout_seconds` above your longest expected generation if that matters.
+
+Before 2026-10-11 the drain only started *after* uvicorn had waited for every open connection, and a queued request is an open connection. Measured: a request queued at Ctrl+C waited for its slot and was then served, and `drain_timeout_seconds` bounded nothing.
 
 ---
 
@@ -361,7 +385,7 @@ KVStream does not ship the model's tokenizer and must **estimate** each request'
 1. **A conservative heuristic** — text is measured by character rate *and* by word/punctuation count, and the larger is used. A plain `chars/4` rule badly under-counts code, JSON and chat markup.
 2. **Online self-calibration** — when the backend returns a `usage` object, KVStream learns the real ratios and adapts (EWMA, clamped). KVStream asks for those counts: non-streamed requests are forwarded non-streamed, and streamed ones carry `stream_options.include_usage`, which most OpenAI-compatible servers require before emitting a trailing usage chunk. If a backend rejects the field, KVStream retries once without it and stops asking.
 
-   `GET /status` reports `backend.usage_reporting`, which means *KVStream is still asking* — **not** that the backend answers. Foundry Local 0.8.119 accepts the field and returns no `usage` block anyway, so status reads `true` while calibration receives nothing. The reliable signal is `token_estimator.samples`: if it stays at 0 under traffic, no real counts are arriving.
+   `GET /status` reports `backend.usage_reporting`, which means *KVStream is still asking* — **not** that the backend answers. Foundry Local 0.8.119 accepts the field and returns no `usage` block anyway, so status reads `true` while calibration receives nothing; 0.10.3 does return it. The reliable signal is `token_estimator.samples` (the model KVStream uses; `token_estimators` lists every model and route that has learned): if it stays at 0 under traffic, no real counts are arriving.
 
 **Measured.** `python benchmarks/estimator_benchmark.py` reproduces this — 400 held-out samples across prose, JSON, code and agent transcripts, scored against `cl100k_base`:
 
@@ -371,7 +395,7 @@ KVStream does not ship the model's tokenizer and must **estimate** each request'
 | KVStream, uncalibrated | 19.1% | +13.8% | 36.2% |
 | KVStream, calibrated | **6.8%** | +5.2% | 16.2% |
 
-**It does not eliminate under-counting, and you should not assume it does.** At the default `token_safety_factor: 1.0` the calibrated estimator still under-counted 16% of held-out samples, worst case by 18%. Code is the hardest shape (15.2% mean error); JSON the easiest (1.7%). For a hard guarantee, buy it explicitly:
+**It does not eliminate under-counting, and you should not assume it does.** At the default `token_safety_factor: 1.0` the calibrated estimator still under-counted 16% of held-out samples, worst case by 16% (the uncalibrated one by 18%). Code is the hardest shape (15.2% mean error); JSON the easiest (1.7%). For a hard guarantee, buy it explicitly:
 
 | `admission.token_safety_factor` | Under-count rate |
 |---|---|
@@ -381,7 +405,7 @@ KVStream does not ship the model's tokenizer and must **estimate** each request'
 
 1.188 was the smallest factor covering every sample in this run; 1.25 is the round number. Estimates are scaled by 1.25, so roughly 20% less work fits in the same budget. The calibrated budget already carries its own 0.85 safety margin, which is why the default is 1.0.
 
-**Caveats:** `cl100k_base` is not the Foundry model's tokenizer, so treat magnitudes as indicative of *shape*. The corpus is synthetic and seeded — reproducible, not representative of your traffic. And **if your backend never reports `usage` — as Foundry Local 0.8.119 does not — calibration never happens** and the uncalibrated row is what you get.
+**Caveats:** `cl100k_base` is not the Foundry model's tokenizer, so treat magnitudes as indicative of *shape*. The corpus is synthetic and seeded — reproducible, not representative of your traffic. And **if your backend never reports `usage` — as Foundry Local 0.8.119 does not — calibration never happens** and the uncalibrated row is what you get. Foundry Local CLI 0.10.3 does report it (checked on streamed and non-streamed responses).
 
 ---
 
@@ -401,7 +425,7 @@ Details worth knowing:
 
 - **Tool calls are billed.** Re-sent transcripts carry `tool_calls`, whose JSON is real prompt tokens on the next turn. Streamed tool-call arguments count as generated tokens.
 - **Images are not.** A non-text content part has no token cost measurable at the HTTP layer. It is forwarded, and it is not guessed at.
-- **No default is imposed on the model.** Omit `max_tokens` or `temperature` and KVStream sends neither, so the model's own default applies. `admission.default_max_tokens` is used only to *cost* such a request and is never sent upstream.
+- **One default is imposed: the generation limit.** A request that sets neither `max_tokens` nor `max_completion_tokens` is sent `max_tokens: 512` — or the value of `kvstream serve --max-tokens N` (`admission.default_max_tokens`) — because that is the length it was admitted on. A limit the client sets is forwarded unchanged, even if larger. Set `admission.apply_default_max_tokens: false` to send nothing and let the model's own default apply. No other field is added: omit `temperature`, `top_p` and the rest and the model's defaults apply.
 - **`n > 1` is allowed and costed as such** — four completions of 512 tokens can occupy four times the KV footprint.
 - **Usage is not fabricated.** A client that did not ask for a usage chunk does not receive one. If the backend reports no counts, the `usage` block is filled from KVStream's estimate and the response carries `X-KVStream-Usage: estimated`.
 - **Caching keeps tool calls intact.** The cache stores the backend's real body (or the exact recorded chunks), and the key includes `stream`.
@@ -421,7 +445,12 @@ Everything version-specific is confined to how the endpoint is located:
 | 3 | **Localhost scan** for a port answering `/v1/models` | Version-agnostic: it tests the HTTP surface. |
 | 4 | **Failure** | Names the correct start command for the generation actually detected. |
 
-**Verified against the service-based CLI only.** Steps 1–4 have been exercised live against `foundry 0.8.119`, including the CLI-assisted lookup — which required a fix, because `foundry service status` reports a *status page* URL (`.../openai/status`), not an API root, so the reported endpoint is now tried both as given and as its bare origin. **The 0.10.x path is implemented and unit-tested against synthetic output, but no 0.10.x binary was available to test against.** Its JSON schema is unverified and has no documented stability contract, so step 2 walks the whole document for a URL-shaped value rather than assuming a field name, and treats any failure as a fall-through.
+**What has been run against which generation.**
+
+- **Service-based CLI (`foundry 0.8.119`)** — steps 1–4 were exercised live, including the CLI-assisted lookup, which needed a fix: `foundry service status` reports a *status page* URL (`.../openai/status`), not an API root, so the reported endpoint is tried both as given and as its bare origin. That binary is no longer installed on the development machine, so **later changes have not been re-run against 0.8.x**; they are covered by unit tests only.
+- **Foundry Local CLI 0.10.3** — exercised live: endpoint lookup through `foundry status --output json` (the URL comes from `service.webUrls`), which models are loaded and what type each is from `foundry cache list --output json`, streamed and non-streamed chat, model auto-detection across an unload/load swap, and a calibration sweep. Neither command's JSON has a documented stability contract, so step 2 still walks the whole document for a URL-shaped value, and any unexpected shape is treated as a miss rather than an error.
+
+Two 0.10.3 behaviours shape what KVStream does. A **streamed** request naming a model that is not loaded is answered `200` and then the connection is dropped, so KVStream checks the loaded list first and returns a `400` instead. And an **embeddings** request naming a *chat* model was followed, both times it was tried, by the service stopping for every client — so KVStream refuses embeddings requests for any model `foundry cache list` reports as type `Chat` (`400`, code `model_not_embedding`), before admission and without contacting Foundry Local. Where the type cannot be read (no CLI, e.g. in a container) the request is forwarded as before.
 
 `backend.use_foundry_cli` defaults to `auto`: enabled on a host, disabled inside a container. `never` and `always` override.
 
@@ -435,13 +464,13 @@ A localhost port answering `/v1/models` is not necessarily Foundry Local; Ollama
 
 ## Configuration
 
-`kvstream.yaml` in the working directory (or `--config path`). See [`kvstream.example.yaml`](kvstream.example.yaml), which documents every field. Every field is also an environment variable (`KVSTREAM_ADMISSION__MODE=tokens`). Precedence: CLI flags → env vars → YAML → defaults.
+`kvstream.yaml` in the working directory (or `--config path`). See [`kvstream.example.yaml`](kvstream.example.yaml), which documents every field. Every field is also an environment variable (`KVSTREAM_ADMISSION__MODE=tokens`). Precedence: CLI flags → env vars → YAML → defaults. A file named with `--config` must exist; a missing or malformed one stops `kvstream` with exit code 2 rather than running on defaults.
 
 ## CLI
 
 ```
-kvstream serve       Start the gateway
-kvstream health      Check gateway + backend health
+kvstream serve       Start the gateway (--max-tokens N: limit for requests that set none; default 512)
+kvstream health      Check gateway + backend health (exit 1 unless serving)
 kvstream status      Live admission / cache stats
 kvstream calibrate   Measure and store the KV-token budget B
 kvstream bench       Send a concurrent load; report latency / errors
@@ -453,7 +482,7 @@ kvstream bench       Send a concurrent load; report latency / errors
 |---|---|
 | `POST /v1/chat/completions` | OpenAI-compatible (streaming + non-streaming), including tool calling |
 | `POST /v1/completions` | Legacy; proxied and admitted on the KV-token budget |
-| `POST /v1/embeddings` | Proxied verbatim; admitted on the KV-token budget |
+| `POST /v1/embeddings` | Proxied verbatim; admitted on the KV-token budget. Refused (`400`) for a model Foundry Local lists as a chat model — see [Both Foundry Local CLI generations](#both-foundry-local-cli-generations) |
 | `POST /v1/audio/transcriptions` | Proxied verbatim; admitted on a separate concurrency limit |
 | `GET /v1/models` | Models reported by the backend |
 | `GET /v1/models/{id}` | Proxied verbatim |
@@ -461,7 +490,7 @@ kvstream bench       Send a concurrent load; report latency / errors
 | `GET /status` | Admission, queue, budget provenance, backend health, drift, cache, coalescer |
 | `GET /metrics` | Prometheus metrics |
 
-Errors use the OpenAI envelope — `{"error": {"message", "type", "code", "param"}}`. Overload and shutdown return `503` with `Retry-After`; a backend failure returns `502` on both streaming and non-streaming paths.
+Errors use the OpenAI envelope — `{"error": {"message", "type", "code", "param"}}`. Overload and shutdown return `503` with `Retry-After`. A backend failure returns `502` on the non-streaming path, and on the streaming path when it happens before the first token; once a stream has started (HTTP 200 already sent), a failure arrives as an error event in the stream and the stream never ends in `[DONE]`.
 
 `/v1/embeddings`, `/v1/audio/transcriptions` and `/v1/completions` can each be turned off in `routes`. Routes Foundry Local exposes that KVStream does **not** proxy are not reachable through the gateway.
 
@@ -476,7 +505,7 @@ Errors use the OpenAI envelope — `{"error": {"message", "type", "code", "param
 - ❌ No authentication, TLS, or multi-tenancy.
 - ❌ No multi-machine routing across several Foundry Local instances. Deliberately absent rather than half-built.
 - ❌ No semantic cache — exact-match only.
-- ⚠️ The token budget is a **calibrated estimate**, and token mode has not been exercised on real hardware.
+- ⚠️ The token budget is a **calibrated estimate**, and token mode is essentially unverified on real hardware (see [What this evidence does not show](#what-this-evidence-does-not-show)).
 - ⚠️ Caching changes response semantics; it is opt-in and limited to deterministic requests.
 - ⚠️ Admission control **costs throughput when the backend is not overloaded**. See [Evidence](#evidence).
 
@@ -484,7 +513,7 @@ Errors use the OpenAI envelope — `{"error": {"message", "type", "code", "param
 
 ## Security
 
-KVStream has **no authentication** and binds to `127.0.0.1` by default. Do not expose it on an untrusted network without an authenticating reverse proxy. `/status` and `/metrics` disclose operational data — treat them as internal. `backend.forward_authorization` passes a caller's `Authorization` header upstream; `backend.api_key` sets a static one.
+KVStream has **no authentication** and binds to `127.0.0.1` by default. Do not expose it on an untrusted network without an authenticating reverse proxy. `/status` and `/metrics` disclose operational data — treat them as internal. `backend.forward_authorization` passes a caller's `Authorization` header upstream; `backend.api_key` sets a static one. Neither is sent to a backend found only by the localhost scan — that could be any local server answering `/v1/models` — only to a configured URL or one reported by the `foundry` CLI.
 
 ---
 
@@ -492,6 +521,8 @@ KVStream has **no authentication** and binds to `127.0.0.1` by default. Do not e
 
 | Document | What it covers |
 |---|---|
+| [User guide and SOPs](docs/USER-GUIDE.md) | Step-by-step operation, runbooks for known failure modes |
+| [Architecture](docs/ARCHITECTURE.md) | The design: request lifecycle, admission, failure semantics, and what was verified live |
 | [Technical proposal (rev 2)](docs/PROPOSAL.md) | The case put to Microsoft, with the premise corrected against measurement |
 | [Appendix B — Calibration methodology](docs/APPENDIX-B-CALIBRATION.md) | How `B` is measured, what it means, and what would make the procedure unnecessary |
 | [Gap analysis](docs/GAP-ANALYSIS.md) | This codebase mapped against the technical proposal, gap by gap, including what is still open |
@@ -504,8 +535,9 @@ KVStream has **no authentication** and binds to `127.0.0.1` by default. Do not e
 
 ```bash
 pip install -e ".[dev]"
-pytest              # 354 unit + integration tests; no live Foundry Local required
-ruff check .
+pytest              # unit + integration tests; no live Foundry Local required
+ruff check src tests
+ruff format --check src tests
 mypy
 
 pip install tiktoken
@@ -513,7 +545,9 @@ python benchmarks/estimator_benchmark.py
 python benchmarks/admission_benchmark.py
 ```
 
-A GitHub Actions workflow is included (`.github/workflows/ci.yml`) that runs the suite on Linux and Windows against Python 3.10 and 3.12, executes both benchmarks and builds the container image. **It has not been executed** — this tree is not a git repository and the workflow has never run on CI.
+CI (`.github/workflows/ci.yml`) runs lint, format check, mypy and the test suite with coverage on **Linux, Windows and macOS** against Python 3.10 and 3.12 (plus 3.11 on Linux), on pushes and pull requests to `main`, and on demand from the Actions tab. It does not run the benchmarks or build the container image.
+
+Until 2026-10-11 the workflow could not pass: it ran on Linux only, pointed lint and type checks at a `kvstream/` directory that does not exist (the code is in `src/kvstream/`), required a coverage plugin that was not a dependency, and its format check failed on 44 files. The steps now pass in a clean Windows environment. **The Linux and macOS jobs have not run yet**; they run on the next push to `main`, pull request, or manual trigger.
 
 ## License
 

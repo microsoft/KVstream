@@ -11,17 +11,35 @@ Priority (highest to lowest):
 from __future__ import annotations
 
 import os
-from typing import Literal
+from contextvars import ContextVar
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    InitSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+# The YAML layer for the `Settings` being built by `Settings.load`. It is a
+# settings *source* ranked below the environment, not constructor arguments:
+# constructor arguments outrank every source, so passing the file that way made
+# YAML beat `KVSTREAM_*` variables — the reverse of the documented order.
+_yaml_layer: ContextVar[dict[str, Any] | None] = ContextVar("kvstream_yaml_layer", default=None)
 
 
 class BackendConfig(BaseModel):
     """Foundry Local connection settings."""
 
     base_url: str = "http://localhost:5273"
-    model: str = "phi-3-mini"
+    # The model KVStream itself uses: for its readiness probe, its startup
+    # check, discovery ranking and calibration records. Client requests carry
+    # their own model and are forwarded unchanged, so this never routes them.
+    # None (default) = auto-detect at startup: used when exactly one model is
+    # loaded in Foundry Local, and reported as undetermined otherwise — never
+    # guessed. (The old default, "phi-3-mini", is an id Foundry Local rejects.)
+    model: str | None = None
     timeout_seconds: float = 120.0
     discover: bool = True  # auto-discover Foundry Local's ephemeral port
     # Minimum seconds between full localhost scans. Without this, a backend that
@@ -64,6 +82,9 @@ class BackendConfig(BaseModel):
     probe_readiness: bool = True
     readiness_interval_seconds: float = Field(default=30.0, ge=1.0)
     readiness_timeout_seconds: float = Field(default=15.0, ge=1.0)
+    # `/health?probe=true` forces a fresh probe, but no more often than this:
+    # the probe is a generation outside the admission budget.
+    readiness_force_min_interval_seconds: float = Field(default=5.0, ge=0.0)
 
     # Circuit breaker. Without it, a stalled backend is rediscovered one request
     # at a time: each arrival queues, waits the full backend timeout and fails,
@@ -92,7 +113,9 @@ class AdmissionConfig(BaseModel):
     # Fraction of `max_tokens` reserved up front in token mode.
     #
     # 1.0 (default) reserves the worst case, exactly as the proposal specifies,
-    # and the budget can then never be breached. Most requests stop far short of
+    # and the budget is then exceeded only with `apply_default_max_tokens` off, by
+    # a request that sets no limit and generates past `default_max_tokens`. Most
+    # requests stop far short of
     # `max_tokens`, so that worst case leaves real capacity idle. Lowering this
     # reserves less and reclaims the difference live as tokens actually arrive;
     # if a generation outgrows its reservation the gateway tops it up rather
@@ -100,10 +123,16 @@ class AdmissionConfig(BaseModel):
     # event is counted in `kvstream_reservation_overshoot_total` — tune against
     # that series, not by guesswork.
     reserve_completion_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
-    # Generation length assumed when a request omits `max_tokens`. Used only to
-    # cost the request for admission — it is never sent to the backend, so the
-    # model's own default still applies.
+    # Generation limit for a request that sets neither `max_tokens` nor
+    # `max_completion_tokens` (`kvstream serve --max-tokens`). It is the length
+    # the request is costed at, and — while `apply_default_max_tokens` is on —
+    # it is also sent upstream as `max_tokens`, so the request cannot generate
+    # past what it was admitted for. A limit the client sets is never changed.
     default_max_tokens: int = Field(default=512, gt=0)
+    # Off restores the earlier behaviour: nothing is added to the request, the
+    # model's own default applies, and such a request can exceed its admitted
+    # cost (counted in kvstream_reservation_overshoot_total).
+    apply_default_max_tokens: bool = True
     # Drift detection: warn when served latency per token exceeds the
     # calibration-time baseline by this factor. A budget measured on a fresh
     # runtime stops describing one that has degraded, and nothing else notices.
@@ -182,6 +211,23 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="KVSTREAM_", env_nested_delimiter="__")
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Constructor, then environment, then the YAML file, then defaults."""
+        sources: list[PydanticBaseSettingsSource] = [init_settings, env_settings, dotenv_settings]
+        yaml_data = _yaml_layer.get()
+        if yaml_data:
+            sources.append(InitSettingsSource(settings_cls, init_kwargs=yaml_data))
+        sources.append(file_secret_settings)
+        return tuple(sources)
+
     # Bind to loopback by default — the gateway has no authentication layer.
     host: str = "127.0.0.1"
     port: int = 8080
@@ -235,15 +281,34 @@ class Settings(BaseSettings):
 
     @classmethod
     def load(cls, path: str | None = None) -> Settings:
-        """Load YAML (if present) then layer env vars and defaults on top."""
+        """
+        Build settings from defaults, the YAML file, then the environment.
+
+        An explicitly named file must exist: silently running on defaults
+        because of a typo in ``--config`` is worse than refusing to start. Only
+        the implicit ``kvstream.yaml`` in the working directory is optional.
+        """
         import yaml
 
         candidate = path
         if candidate is None and os.path.exists("kvstream.yaml"):
             candidate = "kvstream.yaml"
+        elif candidate is not None and not os.path.isfile(candidate):
+            raise FileNotFoundError(f"config file not found: {candidate}")
 
         data: dict = {}
-        if candidate and os.path.exists(candidate):
+        if candidate:
             with open(candidate, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        return cls(**data)
+                loaded = yaml.safe_load(f)
+            if loaded is not None and not isinstance(loaded, dict):
+                raise ValueError(
+                    f"config file {candidate} must contain a mapping of settings, "
+                    f"not a {type(loaded).__name__}"
+                )
+            data = loaded or {}
+
+        token = _yaml_layer.set(data)
+        try:
+            return cls()
+        finally:
+            _yaml_layer.reset(token)

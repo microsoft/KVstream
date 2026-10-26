@@ -33,6 +33,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import httpx
+
 if TYPE_CHECKING:  # pragma: no cover
     from kvstream.backend.foundry import FoundryClient
 
@@ -85,6 +87,11 @@ class CircuitBreaker:
     failure_threshold: int = 5
     reset_seconds: float = 30.0
     enabled: bool = True
+    # How long a half-open trial may stay unresolved before it is presumed
+    # lost. A safety net only: every path that ends a trial without a verdict
+    # should call `release_trial`, but a trial that is never resolved would
+    # otherwise hold the breaker half-open — refusing everyone — forever.
+    trial_timeout: float = 120.0
 
     state: str = CLOSED
     consecutive_failures: int = 0
@@ -93,9 +100,16 @@ class CircuitBreaker:
     fast_failures: int = 0
     last_error: str = ""
     _trial_in_flight: bool = field(default=False, repr=False)
+    _trial_owner: str | None = field(default=None, repr=False)
+    _trial_started: float = field(default=0.0, repr=False)
 
-    def allows(self) -> bool:
-        """Whether a request may proceed to the backend right now."""
+    def allows(self, owner: str | None = None) -> bool:
+        """
+        Whether a request may proceed to the backend right now.
+
+        ``owner`` identifies the request, so that if it becomes the half-open
+        trial, only that request can later release the trial without a verdict.
+        """
         if not self.enabled or self.state == CLOSED:
             return True
         if self.state == OPEN:
@@ -104,18 +118,43 @@ class CircuitBreaker:
                 return False
             # Cooldown elapsed: let exactly one request through to find out.
             self.state = HALF_OPEN
-            self._trial_in_flight = True
+            self._start_trial(owner)
             logger.info("circuit breaker half-open: trying one request")
             return True
         # HALF_OPEN — one trial at a time, everyone else still fails fast.
-        if self._trial_in_flight:
+        if self._trial_in_flight and (time.monotonic() - self._trial_started) < self.trial_timeout:
             self.fast_failures += 1
             return False
-        self._trial_in_flight = True
+        if self._trial_in_flight:
+            logger.warning(
+                "circuit breaker: half-open trial unresolved after %.0fs; "
+                "presuming it lost and allowing another",
+                self.trial_timeout,
+            )
+        self._start_trial(owner)
         return True
+
+    def _start_trial(self, owner: str | None) -> None:
+        self._trial_in_flight = True
+        self._trial_owner = owner
+        self._trial_started = time.monotonic()
+
+    def release_trial(self, owner: str | None) -> None:
+        """
+        End a half-open trial without a verdict.
+
+        For a trial that never produced evidence about the backend: it was
+        refused by admission, the client went away, or the backend answered
+        with a client error. The breaker stays half-open and the next request
+        becomes the trial. A no-op unless ``owner`` holds the trial.
+        """
+        if self._trial_in_flight and owner is not None and owner == self._trial_owner:
+            self._trial_in_flight = False
+            self._trial_owner = None
 
     def record_success(self) -> None:
         self._trial_in_flight = False
+        self._trial_owner = None
         if self.state != CLOSED:
             logger.info("circuit breaker closed: backend is serving again")
         self.state = CLOSED
@@ -124,6 +163,7 @@ class CircuitBreaker:
 
     def record_failure(self, error: str = "") -> None:
         self._trial_in_flight = False
+        self._trial_owner = None
         self.consecutive_failures += 1
         self.last_error = error[:200]
         if not self.enabled:
@@ -161,6 +201,22 @@ class CircuitBreaker:
         }
 
 
+def _timed_out(exc: BaseException) -> bool:
+    """
+    Whether a failed probe ran out of time, rather than being refused.
+
+    Two clocks bound the probe and either can fire first: ``asyncio.wait_for``
+    (``asyncio.TimeoutError``, which is *not* the builtin ``TimeoutError``
+    before Python 3.11) and the HTTP client's read timeout, which the backend
+    client reports as a ``FoundryError`` caused by ``httpx.ReadTimeout``.
+    Catching only the builtin reported a stalled backend as having "rejected"
+    the generation on Python 3.10, and on any version when httpx won the race.
+    """
+    if isinstance(exc, TimeoutError | asyncio.TimeoutError):
+        return True
+    return isinstance(exc.__cause__, httpx.ReadTimeout)
+
+
 class BackendHealth:
     """Owns liveness, readiness and the breaker for one backend."""
 
@@ -171,12 +227,14 @@ class BackendHealth:
         probe_readiness: bool = True,
         readiness_interval: float = 30.0,
         readiness_timeout: float = 15.0,
+        force_min_interval: float = 5.0,
         breaker: CircuitBreaker | None = None,
     ) -> None:
         self._client = client
         self._probe_readiness = probe_readiness
         self._interval = max(1.0, readiness_interval)
         self._timeout = max(1.0, readiness_timeout)
+        self._force_min_interval = max(0.0, force_min_interval)
         self.breaker = breaker or CircuitBreaker()
         self.readiness = Readiness()
         self.reachable = False
@@ -213,8 +271,17 @@ class BackendHealth:
             )
             return self.readiness
 
-        if not force and self.readiness.checked_at and self.readiness.age_seconds < self._interval:
-            return self.readiness
+        if self.readiness.checked_at:
+            age = self.readiness.age_seconds
+            # The probe is a real generation that is not admitted against the
+            # budget, and `?probe=true` is reachable by anyone who can reach
+            # /health. A forced probe therefore still honours a short minimum
+            # interval, so a caller in a loop cannot turn health checks into
+            # unadmitted load on a backend that may serve one request at a time.
+            # Forcing never makes the cache *longer* than an unforced check.
+            limit = min(self._force_min_interval, self._interval) if force else self._interval
+            if age < limit:
+                return self.readiness
 
         if self._lock.locked():
             # A probe is already running; do not pile a second generation onto
@@ -236,7 +303,15 @@ class BackendHealth:
                     ),
                     timeout=self._timeout,
                 )
-            except (TimeoutError, asyncio.TimeoutError):
+            except Exception as exc:  # noqa: BLE001 — any failure means not ready
+                if not _timed_out(exc):
+                    self.readiness = Readiness(
+                        ready=False,
+                        checked_at=time.monotonic(),
+                        latency_seconds=time.monotonic() - started,
+                        detail=f"backend rejected a 1-token generation: {exc}"[:300],
+                    )
+                    return self.readiness
                 self.readiness = Readiness(
                     ready=False,
                     checked_at=time.monotonic(),
@@ -246,14 +321,6 @@ class BackendHealth:
                     ),
                 )
                 logger.warning("readiness probe failed: %s", self.readiness.detail)
-                return self.readiness
-            except Exception as exc:  # noqa: BLE001 — any failure means not ready
-                self.readiness = Readiness(
-                    ready=False,
-                    checked_at=time.monotonic(),
-                    latency_seconds=time.monotonic() - started,
-                    detail=f"backend rejected a 1-token generation: {exc}"[:300],
-                )
                 return self.readiness
 
             self.readiness = Readiness(
@@ -266,13 +333,17 @@ class BackendHealth:
 
     # -- breaker -------------------------------------------------------
 
-    def guard(self) -> None:
+    def guard(self, owner: str | None = None) -> None:
         """Raise :class:`BackendUnavailable` when the breaker is open."""
-        if not self.breaker.allows():
+        if not self.breaker.allows(owner):
             raise BackendUnavailable(
                 f"backend is not serving (circuit breaker {self.breaker.state}): "
                 f"{self.breaker.last_error or 'consecutive failures'}"
             )
+
+    def release_trial(self, owner: str | None) -> None:
+        """End ``owner``'s half-open trial, if it holds one, without a verdict."""
+        self.breaker.release_trial(owner)
 
     def record_success(self) -> None:
         self.breaker.record_success()

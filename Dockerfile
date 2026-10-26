@@ -32,8 +32,13 @@ ENV KVSTREAM_HOST=0.0.0.0 \
 
 EXPOSE 8080
 
-# /health returns 503 when the backend is unreachable, so this is a real check.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"
+# /health returns 503 when the backend is not serving, so this is a real check.
+# It can also run a real 1-token generation (bounded by
+# KVSTREAM_BACKEND__READINESS_TIMEOUT_SECONDS, 15 s by default) after a 5 s
+# liveness check, so the client waits for that plus margin. A 4 s limit marked a
+# healthy gateway unhealthy whenever the probe was slow — measured at 6-12.5 s on
+# a cold model. Docker's own --timeout is the outer bound and must stay above it.
+HEALTHCHECK --interval=30s --timeout=60s --start-period=30s --retries=3 \
+    CMD python -c "import os,sys,urllib.request; t=float(os.environ.get('KVSTREAM_BACKEND__READINESS_TIMEOUT_SECONDS','15'))+10; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=t).status == 200 else 1)"
 
 ENTRYPOINT ["kvstream", "serve"]
