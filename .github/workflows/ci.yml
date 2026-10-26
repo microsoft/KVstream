@@ -33,10 +33,10 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -49,14 +49,13 @@ jobs:
       # The package lives in src/kvstream (src layout); these steps used to
       # point at a `kvstream/` directory that does not exist, and failed.
       - name: Lint (ruff)
-        run: ruff check src tests
+        run: ruff check src/kvstream tests
 
       - name: Format check (ruff)
-        run: ruff format --check src tests
+        run: ruff format --check src/kvstream tests
 
       - name: Type check (mypy)
-        # Reads `packages = ["kvstream"]` from pyproject.toml.
-        run: mypy
+        run: mypy src/kvstream
 
       - name: Run tests
         run: python -m pytest --cov=kvstream --cov-report=term-missing
